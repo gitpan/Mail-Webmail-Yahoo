@@ -1,5 +1,21 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.30i  Sun Oct 20 12:26:08 EDT 2002
+  - Fixed a typo in Synopsis (WebMail should be Webmail)
+  - Set default trace level to 1 in snagmail.pl and sendhoo.pl.
+  - Converted many constant strings to pre-compiled regexps.
+  - Major changes to work with new HTML in Yahoo rendered pages:
+    o  Added 'Textractor' mini-class to remove HTML tags from mail headers.
+    o  Changed MESSAGE_START_STRING and friends
+    o  Changed LOOKS_LIKE_A_HEADER and mail_header_names - regexps instead of
+       simple strings. 
+
+Note: 0.30i is an interim release, intended to provide a minimal level of
+usablity. There is still some work to be done with message conversion and
+other items.
+
+
+
 0.22  Sat Oct 12 14:36:06 EDT 2002
   - Fixed problem with not loading pages correctly.
 

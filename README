@@ -27,7 +27,7 @@ package. It allows you to download to your local machine all of the messages
 in your Yahoo account, attachments included. Future versions will allow bulk
 deletion, forwarding, and other useful mail functions.
 
-This is version 0.2 of the Webmail::Yahoo package; it may therefore be
+This is version 0.3 of the Mail::Webmail::Yahoo package; it may therefore be
 slightly brittle. While I have been testing it and using it on my own yahoo
 accounts for several weeks, I would appreciate any feedback, positive or
 negative.
@@ -40,7 +40,6 @@ inbox and stores it to disk in mbox format.
 Call it with 
 
   snagmail.pl <yahoo username> <password> [<number of messages>]
-
 
 
 Also included is 'sendhoo.pl', which can be used to send simple messages via
@@ -81,6 +80,8 @@ This module requires these other modules and libraries:
 	HTML::FormParser
 	HTML::TableExtractor
 	HTML::TableContentParser
+	HTML::Element
+	HTML::TreeBuilder
 	CGI
 
 COPYRIGHT AND LICENCE

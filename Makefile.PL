@@ -4,6 +4,12 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     'NAME'		=> 'Mail::Webmail::Yahoo',
     'VERSION_FROM'	=> 'Yahoo.pm', # finds $VERSION
+		'PM'  => {
+			'MessageParser.pm' => '$(INST_LIB)/Mail/Webmail/MessageParser.pm',
+			'Yahoo.pm' => '$(INST_LIB)/Mail/Webmail/Yahoo.pm',
+			'snagmail.pl' => '$(INST_LIB)/Mail/Webmail/snagmail.pl',
+			'sendhoo.pl' => '$(INST_LIB)/Mail/Webmail/sendhoo.pl',
+			},
     'PREREQ_PM'		=> {
 			LWP::UserAgent => 0.1,
 			HTTP::Request => 0.1,
@@ -16,6 +22,7 @@ WriteMakefile(
 			HTML::FormParser => 0.1,
 			HTML::TableExtractor => 0.1,
 			HTML::TableContentParser => 0.1,
+			HTML::Tree => 0.1,
 			Class::MethodMaker  => 0.1,
 		}, # e.g., Module::Name => 1.1
 

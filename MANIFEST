@@ -2,7 +2,9 @@ Changes
 Makefile.PL
 MANIFEST
 README
+TODO
 Yahoo.pm
+MessageParser.pm
 snagmail.pl
 sendhoo.pl
 t/all.t

@@ -1,13 +1,16 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   03/22/02
 
-#  $Id: Yahoo.pm,v 1.9 2002/10/16 14:18:50 simon Exp $
+#  $Id: Yahoo.pm,v 1.12 2002/10/24 21:39:23 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
 
 require 5.006_000;
 
+
+BEGIN { open SIMONLOG, ">simon.$$.tmp" }
+END   { close SIMONLOG }
 
 
 use strict;
@@ -20,7 +23,7 @@ our @ISA = qw(Exporter);
 # This is an object-based package. We export nothing except for some flag
 # values.
 our @EXPORT_OK = ();
-our @EXPORT = qw(SAVE_COPY_TO_SENT_FOLDER);
+our @EXPORT = qw(SAVE_COPY_TO_SENT_FOLDER SUPPRESS_BANNERS);
 
 
 use Carp qw(carp);
@@ -39,11 +42,12 @@ use Mail::Internet;
 use MIME::Base64;
 use HTML::FormParser;
 use HTML::TableContentParser;
+use Mail::Webmail::MessageParser;
 use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.22;
+our $VERSION = 0.30;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -61,10 +65,10 @@ our $LOGIN_SERVER         = 'http://mail.yahoo.com';
 our $FOLDER_APP_NAME      = 'Folders';
 our $SHOW_FOLDER_APP_NAME = 'ShowFolder';
 our $SHOW_MSG_APP_NAME    = 'ShowLetter';
-our $SHOW_TOC             = 'toc=[^\&]*';
+our $SHOW_TOC             = qr{toc=[^\&]*};
 
 our $FULL_HEADER_FLAG     = 'Nhead=f&head=';
-our $EMPTY_FULL_HEADER_FLAG = 'head=[^\&]*&?';
+our $EMPTY_FULL_HEADER_FLAG = qr{head=[^\&]*&?};
 
 our $LOGIN_FIELD          = 'login';
 our $PASSWORD_FIELD       = 'passwd';
@@ -72,12 +76,10 @@ our $SAVE_USER_INFO_FIELD = '.persistent';
 
 
 # Should only get the 'check mail' option if logged in..
-our $WELCOME_PAGE_CHECK   = '<a\s+href="/ym/ShowFolder?[^>]*>Check Mail</a>';
+our $WELCOME_PAGE_CHECK   = qr{<a\s+href="/ym/ShowFolder?[^>]*>Check Mail</a>};
 
 
 our $DATE_MOLESTERED_STRING = 'Date header was inserted';
-our $LOOKS_LIKE_A_HEADER = q{\w+:};
-
 
 our $COMPOSE_APP_NAME    = 'Compose';
 our $COMPOSE_TO_FIELD    = 'To';
@@ -89,7 +91,6 @@ our $COMPOSE_SAVE_COPY   = 'SaveCopy';
 
 ##our $COMPOSE_SENT_OK_PRE = 'Your\s+mail\s*';
 ##our $COMPOSE_SENT_OK_POST= '\s*has\s+been\s+sent\s+to';
-
 # New Version of Yahoo
 our $COMPOSE_SENT_OK_PRE = '<td class=mtitle>Message Sent</td>';
 our $COMPOSE_SENT_OK_POST= '';
@@ -98,14 +99,8 @@ our $COMPOSE_SENT_OK_POST= '';
 
 
 ## Flag names & values. Used when sending, among other things.
-
-use constant SAVE_COPY_TO_SENT_FOLDER  => 1;
-
-
-
-our @mail_header_names = qw(
-		To From Reply-To Subject Date X- Received Content- 
-);
+use constant SAVE_COPY_TO_SENT_FOLDER => 1;
+use constant SUPPRESS_BANNERS         => 2;
 
 
 
@@ -120,34 +115,9 @@ showing \d+-\d+ of \d+
 };
 
 
-our $MESSAGE_START_STRING = qq{
-<select name="destBox">
-<option value="">- Choose Folder -
-.*(?!</select>)
-</select>
-<input type=submit name=MOV value="Move">
+our $MESSAGE_START_STRING = qr{<div id=['"]?message['"]?>};
 
-</font></td>
-
-<td align=right nowrap><font[^>]*>
-<input type=submit name=UNR value="Mark as Unread">
-</font></td>
-</tr>
-};
-
-
-our $MESSAGE_END_STRING = qq{
-<table cellspacing=0 cellpadding=0 width="100%">
-<tr>
-<td colspan=3>
-<hr size=1 noshade>
-</td>
-</tr>
-<tr>
-<td nowrap valign=top><font face=times size=-1>Click a <[^\>]+> to send an instant message to an online friend</td>
-<td>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</td>
-};
-
+our $MESSAGE_END_STRING = qr{</div>};
 
 
 sub new
@@ -157,14 +127,15 @@ sub new
 	my %args = @_;
 	
 	my $self = bless {
-		_server    => $args{server}   || $SERVER,
-		_username  => $args{username} || Carp::carp('No username defined'),
-		_password  => $args{password} || Carp::carp('No password defined'),
-		_login_server => $args{login_server}|| $args{server} || $LOGIN_SERVER,
-		_cookie_file => $args{cookie_file},
-		_logged_in => 0,
-		_connected => 0,
-		_ua        => new LWP::UserAgent,
+		_server        => $args{server}   || $SERVER,
+		_username      => $args{username} || Carp::carp('No username defined'),
+		_password      => $args{password} || Carp::carp('No password defined'),
+		_login_server  => $args{login_server}|| $args{server} || $LOGIN_SERVER,
+		_cookie_file   => $args{cookie_file},
+		_logged_in     => 0,
+		_connected     => 0,
+		_ua            => new LWP::UserAgent,
+		_html_parser   => new Textractor,
 	}, $class;
 
 	if ($args{retrieve}) {
@@ -270,6 +241,7 @@ sub login
 # with the fields gleaned from the login page (plus our username and password
 # of course). Note that there is some feature in LWP that doesn't like
 # redirects from https, so we have to give it an insecure URI here.
+# FIXME: track this down; provide a secure work-around.
 	$uri = $self->{STORED_URIS}->{login}->{action};
 	$uri =~ s/https/http/g;
 	my $meth = $self->{STORED_URIS}->{login}->{method};
@@ -318,7 +290,7 @@ sub get_mail_headers
 
 sub get_mail_messages
 {
-	my ($self, $mbox, $msg_list) = @_;
+	my ($self, $mbox, $msg_list, $flags) = @_;
 
 
 	$self->login unless $self->{_logged_in};
@@ -328,15 +300,19 @@ sub get_mail_messages
 	my @messages;
 
 	my @message_nums;
-	if ($msg_list) {
+
+	if (ref($msg_list) eq 'ARRAY') { 
 		@message_nums = @{$msg_list};
 		$self->debug("Fetching messages numbered @message_nums") if $self->trace;
+	} elsif (lc($msg_list) eq 'all' || !$msg_list) {
+		@message_nums = (1..@msgs);
 	}
 
 	my $mcount = 0;
+
 	for (@msgs) {
 		++$mcount;
-		next unless !@message_nums || grep { $_ == $mcount } @message_nums;
+		next unless @message_nums && grep { $_ == $mcount } @message_nums;
 
 		my $uri = $_->{uri};
 		$uri =~ s/$EMPTY_FULL_HEADER_FLAG//g;
@@ -347,6 +323,8 @@ sub get_mail_messages
 		
 		if ($page) {
 
+			$self->debug("Processing page at $uri") if $self->trace;
+
 			my @hdrs;
 
 			my $p = new HTML::TableContentParser;
@@ -354,8 +332,14 @@ sub get_mail_messages
 
 			my $from_date = '';
 
-# Remove as much crap as possible from the page before parsing it..
-			$page =~ s{.+$MESSAGE_START_STRING(.+)$MESSAGE_END_STRING.+}{$1}sig;
+# Change the program name to display the number of the current message, if
+# supported.
+			(my $prog = $0) =~ s/\s+\d+\s+messages//g;
+			$prog .= ' ' . (0+@messages) . ' messages';
+			$0 = $prog;
+
+
+			print SIMONLOG "sdd 025.$mcount; ($page)\n";
 
 			for my $t (@$stored_tables) {
 				next unless $t->{rows};
@@ -371,43 +355,41 @@ sub get_mail_messages
 # list of message headers. The first check is faster than examining every item
 # of data through the grep.
 
-
 						next unless my $field = $r->{cells}->[$c]->{data};
-						if ($field =~ /$LOOKS_LIKE_A_HEADER/ &&
-								grep { $field =~ /^$_.*:/i } @mail_header_names) {
+						my $data  = $r->{cells}->[$c+1]->{data};
 
-							my $data = $r->{cells}->[$c+1]->{data};
+						my $mp = new Mail::Webmail::MessageParser;
+						my $hdr = $mp->parse_header($field, $data);
+						$mp->delete(); # Free allocated memory
+						next unless $hdr;
+						++$c;
 
-							chomp $data;
-
-# 'From' header has block address crap in it..
-							if ($field =~ /From/) {
-								$data =~ s/\&nbsp;\|.*//g;
+# 'From' header has 'block address' and other crap in it..
+						if ($hdr =~ /^From/) {
+							# remove everything after a | or  (\240) character
+							$hdr =~ s/((\&nbsp;)|(\s*))?(\||\240).*//g;
 
 # Also add a 'From' line so pine et al recognise it as a message.
-								my $from = HTML::Entities::decode($data); 
-								$from =~ s/".*"//g;
-								$from =~ s/<|>//g;
+							my ($from) = $hdr =~ /:\s*(.*)/;
+							$from =~ s/".*"//g;
+							$from =~ s/<|>//g;
 
-								push @hdrs, "From $from";
+							push @hdrs, "From $from";
 
-							} elsif ($field =~ /Date/) {
+						} elsif ($hdr =~ /Date/) {
 # Sometimes the date field gets molestered..
-								if ($data =~ /$DATE_MOLESTERED_STRING/) {
-									$data = ' ' . scalar localtime time;
-								}
-#								($from_date = $data) =~ s/,//g;
-								$from_date =  ' ' . scalar localtime time;
+							if ($hdr =~ /$DATE_MOLESTERED_STRING/) {
+								$hdr = ' ' . scalar localtime time;
 							}
-
-							push @hdrs, "$field " . HTML::Entities::decode($data);
-							++$c;
-
+#							($from_date = $data) =~ s/,//g;
+							$from_date =  ' ' . scalar localtime time;
 						}
+
+						push @hdrs, $hdr;
 					}
 				}
 			}
-				
+
 # Sort the headers so 'From' comes first..
 			my $hdr = [sort { $a =~ /^From\s+/ ? -1 : 1 } @hdrs];
 # ..and add the date to the 'From' header, so it looks like mail.
@@ -416,18 +398,20 @@ sub get_mail_messages
 
 			push @messages, $mhdr;
 
-# So much for the header, now for the body.. This gets a little trickier since
-# there is nothing simple to trigger off.
-# It /appears/ that yahoo very kindly sticks three blank lines before 
-# each message body... so let's try that to get the start of the message. The
-# end will be a little harder...
+# So much for the header, now for the body.. Yahoo kindly provides 
+# <div id=message> at the top, but the bottom is just a </div>. So we have to
+# hope the HTML is correctly formed, or at least those parts of it - a stray
+# </div> inside the message body will cause problems. See the documentation
+# for MessageParser for more.
+			my $mp = new Mail::Webmail::MessageParser;
+			$mp->message_start(_tag => 'div', id => 'message');
+			my $body = $mp->parse_body_as_text($page);
+			$mp->delete();
 
-			my @body = $page =~ /\n\n\n\n(.*)/is;
-			$mhdr->body(@body, "\n");
-
-			(my $prog = $0) =~ s/\s+\d+\s+messages//g;
-			$prog .= ' ' . (0+@messages) . ' messages';
-			$0 = $prog;
+# Set the body. Grue. I kinda think it would be nice if $mhdr->print_body
+# could be given a delimiter to print between each pair of elements.
+			my @body = map { "$_\n" } split /\n/, $body;
+			$mhdr->body(@body);
 
 # Check for downloadable attachments, mime-encode, and stuff into the message
 # using some magic to set content types etc.
@@ -517,7 +501,7 @@ sub add_attachment_to_message
 
 sub get_folder_index
 {
-	my ($self, $mbox, $callback) = @_;
+	my ($self, $mbox) = @_;
 
 	$mbox ||= 'Inbox';
 	$self->login unless $self->{_logged_in};
@@ -527,7 +511,7 @@ sub get_folder_index
 	}
 
 	my $uri = $self->{STORED_URIS}->{folder_list}->{$mbox};
-	$self->debug("INDEX URI for $mbox: $uri");
+	$self->debug("INDEX URI for $mbox: $uri") if $self->trace() > 1;
 	my $info = $self->_get_a_page($uri);
 	my $index = $info->content;
 
@@ -552,6 +536,7 @@ sub get_folder_index
 
 	return @msgs;
 }
+
 
 
 sub _get_message_links
@@ -861,9 +846,34 @@ sub make_host
 }
 
 
+1;
+
+
+
+package Textractor;
+
+use base 'HTML::Parser';
+
+sub parse_text 
+{
+	my ($self, $html) = @_;
+	$self->{stored_text} = '';
+	$self->parse($html);
+	return $self->{stored_text};
+}
+
+
+sub text
+{
+	my ($self, $text) = @_;
+	$self->{stored_text} .= $text;
+}
 
 
 1;
+
+
+
 
 __END__
 
@@ -874,7 +884,7 @@ Mail::Webmail::Yahoo - Enables bulk download of yahoo.com -based webmail.
 =head1 SYNOPSIS
 
   use Mail::Webmail::Yahoo;
-  $yahoo = Mail::WebMail::Yahoo->new(%options);
+  $yahoo = Mail::Webmail::Yahoo->new(%options);
   @folders = $yahoo->get_folder_list();
   @messages = $yahoo->get_mail_messages('Inbox', 'all');
   # Write messages to disk here, or do something else.
@@ -919,7 +929,7 @@ Returns 0 if already logged in, 1 if successful, otherwise sets $@ and returns
 undef.
 
 
-=item @headers = $yahoo->get_mail_headers($folder, $callback);
+=item @headers = $yahoo->get_mail_headers($folder);
 
 ***DEPRECATED***
 
@@ -943,10 +953,8 @@ Snagmail object's cache to 0 with
   $yahoo->cache_messages(0);
   $yahoo->cache_headers(0);
 
-
-If $callback is provided it will be called for each header in turn as it is
-collected.
-
+Note: There used to be a $callback parameter to this method, but since it was
+never used it has been removed.
 
 =item $page = $yahoo->download_attachment($download_uri, $mailmsg);
 
