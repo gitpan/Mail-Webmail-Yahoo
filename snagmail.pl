@@ -1,8 +1,8 @@
 #!/usr/bin/perl -w
 
 #  Simon Drabble	03/22/02
-#  sdrabble@span.org
-#  $Id: snagmail.pl,v 1.15 2002/05/01 20:31:16 simon Exp $
+#  sdrabble@cpan.org
+#  $Id: snagmail.pl,v 1.2 2002/07/27 15:00:09 simon Exp $
 #
 
 

@@ -27,10 +27,10 @@ package. It allows you to download to your local machine all of the messages
 in your Yahoo account, attachments included. Future versions will allow bulk
 deletion, forwarding, and other useful mail functions.
 
-This is version 0.1 of the Webmail::Yahoo package; it may therefore be
+This is version 0.2 of the Webmail::Yahoo package; it may therefore be
 slightly brittle. While I have been testing it and using it on my own yahoo
-accounts for several weeks, I would appreciate any feedback if, for example, 
-it doesn't work under particular conditions.
+accounts for several weeks, I would appreciate any feedback, positive or
+negative.
 
 
 Included in the distribution is a sample script, 'snagmail.pl', which should
@@ -42,13 +42,22 @@ Call it with
   snagmail.pl <yahoo username> <password> [<number of messages>]
 
 
+
+Also included is 'sendhoo.pl', which can be used to send simple messages via
+your yahoo account. Usage is:
+
+  sendhoo.pl <yahoo username> <yahoo password> <to-list> <subject> <body>
+
+where to-list is a comma-separated list of email addresses.
+
+
 INSTALLATION
 
 To install this module type the following:
 
    perl Makefile.PL
    make
-   make test
+   make test          # (optional, but recommended)
    make install
 
 DEPENDENCIES
@@ -71,4 +80,8 @@ This module requires these other modules and libraries:
 COPYRIGHT AND LICENCE
 
 Copyright (C) 2002  Simon Drabble  <sdrabble@cpan.org>
+
+
+This module is released under the same terms as perl itself. Please see
+http://www.perl.com for full details.
 

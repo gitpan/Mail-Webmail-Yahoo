@@ -2,6 +2,8 @@ Changes
 Makefile.PL
 MANIFEST
 README
-snagmail.pl
+TODO
 Yahoo.pm
-t/1.t
+snagmail.pl
+sendhoo.pl
+t/all.t

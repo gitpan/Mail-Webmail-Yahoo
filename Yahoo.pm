@@ -1,12 +1,14 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   03/22/02
 
-#  $Id: Yahoo.pm,v 1.19 2002/04/24 17:18:32 simon Exp $
+#  $Id: Yahoo.pm,v 1.7 2002/07/28 15:03:48 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
 
-require 5.6.0;
+require 5.006_000;
+
+
 
 use strict;
 use warnings;
@@ -14,11 +16,11 @@ use warnings;
 require Exporter;
 our @ISA = qw(Exporter);
 
-our $VERSION = 0.13;
 
-# This is an object-based package. We export nothing.
+# This is an object-based package. We export nothing except for some flag
+# values.
 our @EXPORT_OK = ();
-our @EXPORT = ();
+our @EXPORT = qw(SAVE_COPY_TO_SENT_FOLDER);
 
 
 use Carp qw(carp);
@@ -27,6 +29,7 @@ use Carp qw(carp);
 use LWP::UserAgent;
 # Turn on for mondo debugging oh yeah.
 #use LWP::Debug qw(+);
+use URI::URL;
 use HTTP::Request;
 use HTTP::Headers;
 use HTTP::Cookies;
@@ -35,10 +38,12 @@ use HTML::Entities;
 use Mail::Internet;
 use MIME::Base64;
 use HTML::FormParser;
-use HTML::TableExtractor;
 use HTML::TableContentParser;
 use CGI qw(escape unescape);
 
+
+
+our $VERSION = 0.20;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -46,7 +51,9 @@ use Class::MethodMaker
 
 # These next bits should ideally go in a config file or something. Or be
 # passable on the command line, or overrideable in the calling app. They will
-# (hopefully) never change, but if they do...
+# (hopefully) never change, but if they do, it would be better for the user to
+# edit a simple configuration file than modify (possibly system-wide) code.
+
 # Would prefer to 'use constant...' but that doesn't work well in regexps.
 our $SERVER               = 'http://mail.yahoo.com';	
 our $LOGIN_SERVER         = 'http://mail.yahoo.com';	
@@ -63,8 +70,31 @@ our $LOGIN_FIELD          = 'login';
 our $PASSWORD_FIELD       = 'passwd';
 our $SAVE_USER_INFO_FIELD = '.persistent';
 
+
+# Should only get the 'check mail' option if logged in..
+our $WELCOME_PAGE_CHECK   = '<a\s+href="/ym/ShowFolder?[^>]*>Check Mail</a>';
+
+
 our $DATE_MOLESTERED_STRING = 'Date header was inserted';
 our $LOOKS_LIKE_A_HEADER = q{\w+:};
+
+
+our $COMPOSE_APP_NAME    = 'Compose';
+our $COMPOSE_TO_FIELD    = 'To';
+our $COMPOSE_CC_FIELD    = 'Cc';
+our $COMPOSE_BCC_FIELD   = 'Bcc';
+our $COMPOSE_SUBJ_FIELD  = 'Subj';
+our $COMPOSE_BODY_FIELD  = 'Body';
+our $COMPOSE_SAVE_COPY   = 'SaveCopy';
+
+our $COMPOSE_SENT_OK_PRE = 'Your\s+mail\s*';
+our $COMPOSE_SENT_OK_POST= '\s*has\s+been\s+sent\s+to';
+
+
+## Flag names & values. Used when sending, among other things.
+
+use constant SAVE_COPY_TO_SENT_FOLDER  => 1;
+
 
 
 our @mail_header_names = qw(
@@ -129,8 +159,11 @@ sub new
 		_logged_in => 0,
 		_connected => 0,
 		_ua        => new LWP::UserAgent,
-		_retrieve  => $args{retrieve} || 'all',
 	}, $class;
+
+	if ($args{retrieve}) {
+		warn __PACKAGE__, ": new: use of 'retrieve' parameter is deprecated and will be ignored.\n";
+	}
 
 
 	if (!$self->{_ua}->is_protocol_supported('https')) {
@@ -151,6 +184,8 @@ sub new
 
 	$self->cache_messages(1);
 	$self->cache_headers(1);
+
+	$self->trace(0);
 	
 	return $self;
 }
@@ -177,15 +212,18 @@ sub login
 	my $uri = $self->{_login_server};
 	$self->debug(" requesting login page '$uri'.") if $self->trace > 3;
 	my $info = $self->_get_a_page($uri, 'GET');
-	my $welcome_page = $info->content;
+	my $login_page = $info->content;
 
-	die "Problem getting login page" unless $welcome_page;
+	unless ($login_page) {
+		$@ = "Problem getting login page.";
+		return undef;
+	}
 
 	my $p = new HTML::FormParser;
 
 	my @login_params;
 
-	$self->debug(" parsing login page.") if $self->trace > 3;
+	$self->debug(" parsing login page.") if $self->trace > 4;
 
 # Parse the returned 'welcome' page looking for a suspicious link to login
 # with. This is kindly provided by (as of 2002-04-06 at least) the only form
@@ -195,11 +233,10 @@ sub login
 # the login page; we provide this username in the object parameters.
 # It might speed things up a little, but until Yahoo stops retiring sessions
 # every eight hours or so, I'm not gonna bother re-using cookies.
-	my $pobj = $p->parse($welcome_page, 
-				form => sub {
+	my $pobj = $p->parse($login_page, 
+				start_form => sub {
 					my ($attr, $origtext) = @_;
-					return if lc $attr  eq '</form>';
-					$self->{STORED_URIS}->{login_page} = $attr; 
+					$self->{STORED_URIS}->{login} = $attr; 
 				},
 				input => sub {
 					my ($attr, $origtext) = @_;
@@ -223,23 +260,43 @@ sub login
 	}
 
 
-
 # This bit makes the actual request to login, having stuffed the @params array
 # with the fields gleaned from the login page (plus our username and password
 # of course). Note that there is some feature in LWP that doesn't like
-# redirects from https.
-	$uri = $self->{STORED_URIS}->{login_page}->{action};
+# redirects from https, so we have to give it an insecure URI here.
+	$uri = $self->{STORED_URIS}->{login}->{action};
 	$uri =~ s/https/http/g;
-	my $meth = $self->{STORED_URIS}->{login_page}->{method};
-	for (@params) { warn "$_\n" }
+	my $meth = $self->{STORED_URIS}->{login}->{method};
+#	for (@params) { warn "$_\n" }
 
 	$info = $self->_get_a_page($uri, $meth, \@params);
-	$welcome_page = $info->content;
+	my $welcome_page = $info->content;
 
-	die "Couldn't log in" unless $welcome_page;
+	unless ($welcome_page) {
+		$@ = "Unable to log in.";
+		return undef;
+	}
+
+## welcome_page could be the login page returned, in the event of login
+## failure.
+	if ($welcome_page !~ /$WELCOME_PAGE_CHECK/) {
+		$@ = "Unable to log in.";
+		return undef;
+	}
+
+
+	$self->{STORED_PAGES}->{welcome} = $welcome_page;
+
+	my $logged_in_uri = $info->request->url;
+
+	$self->{STORED_URIS}->{welcome} = make_host($logged_in_uri);
+
 
 	$self->debug(" logged in.") if $self->trace;
+	$self->debug("Welcome URI is $logged_in_uri") if $self->trace > 4;
 	$self->{_logged_in} = 1;
+
+	return 1;
 }
 
 
@@ -266,7 +323,7 @@ sub get_mail_messages
 	my @message_nums;
 	if ($msg_list) {
 		@message_nums = @{$msg_list};
-		$self->debug("Fetching messages numbered @message_nums");
+		$self->debug("Fetching messages numbered @message_nums") if $self->trace;
 	}
 
 	my $mcount = 0;
@@ -359,9 +416,6 @@ sub get_mail_messages
 # end will be a little harder...
 
 			my @body = $page =~ /\n\n\n\n(.*)/is;
-##			open FOO, ">tmp/page_$mcount";
-##			print FOO $page;
-##			close FOO;
 			$mhdr->body(@body, "\n");
 
 			(my $prog = $0) =~ s/\s+\d+\s+messages//g;
@@ -372,17 +426,18 @@ sub get_mail_messages
 # using some magic to set content types etc.
 			while ($page =~ s{$DOWNLOAD_FILE_LINK}{}si) {
 				my $download_link = $1;
-				my $url = new URI::URL($_->{uri});
+				my $url = make_host($_->{uri});
 				$download_link .= $FULL_HEADER_FLAG;
-				my $link = $url->scheme . '://' . $url->host . $download_link;
+				my $link = $url . $download_link;
 				my $att = $self->download_attachment($link, $mhdr);
 			}
 
 			print 0+@messages, " messages\n" if (!(@messages % 20));
 
-			if ($self->{_retrieve} =~ /^(\d+)$/  && @messages >= $1) {
-				return @messages
-			}
+# ## _retrieve mechanism is deprecated.
+#			if ($self->{_retrieve} =~ /^(\d+)$/  && @messages >= $1) {
+#				return @messages
+#			}
 
 
 		} else {
@@ -502,7 +557,7 @@ sub _get_message_links
 				if ($type eq 'href' &&
 						$uri =~ /$SHOW_MSG_APP_NAME\?.*MsgId=([^\&]*)/i &&
 						$uri !~ /$SHOW_TOC/i) {
-					$self->debug(" get_message_list: $uri") if $self->trace;
+					$self->debug(" get_message_list: $uri") if $self->trace > 4;
 					$self->{STORED_URIS}->{messages}->{$1} = $uri;
 # Use a separate array here rather than simply returning the keys of the
 # STORED_URIS->message hash since we're only interested in one folder.
@@ -512,7 +567,7 @@ sub _get_message_links
 						};
 				}
 			},
-			$self->{_folder_uri} || $self->{_server});
+			$self->{STORED_URIS}->{folder} || $self->{_server});
 
 	$p->parse($page);
 
@@ -525,12 +580,12 @@ sub get_folder_list
 	my ($self) = @_;
 	$self->login unless $self->{_logged_in};
 
-	my $index = $self->{STORED_PAGES}->{initial};
+	my $index = $self->{STORED_PAGES}->{welcome};
 	if (!$index) {
 		my $info = $self->_get_a_page($self->{_server});
 		my $server = $info->request->uri;
 		$index = $info->content;
-		$self->{_folder_uri} = $server;
+		$self->{STORED_URIS}->{folder} = $server;
 	}
 
 
@@ -543,7 +598,7 @@ sub get_folder_list
 						$self->{STORED_URIS}->{front_page} = $uri;
 					}
 				},
-				$self->{_folder_uri} || $self->{_server});
+				$self->{STORED_URIS}->{folder} || $self->{_server});
 
 		$p->parse($index);
 	}
@@ -558,17 +613,135 @@ sub get_folder_list
 					my ($tag, $type, $uri) = @_;
 					if ($type eq 'href' &&
 							$uri =~ /$SHOW_FOLDER_APP_NAME\?.*box=([^\&]*)/) {
-						$self->debug(" get_folder_list: $uri") if $self->trace;
+						$self->debug(" get_folder_list: $uri") if $self->trace > 4;
 						$self->{STORED_URIS}->{folder_list}->{$1} = $uri;
 					}
 				},
-				$self->{_folder_uri} || $self->{_server});
+				$self->{STORED_URIS}->{folder} || $self->{_server});
 
 		$p->parse($indp);
 	}
 
 	return keys %{$self->{STORED_URIS}->{folder_list}};
 }
+
+
+
+
+sub send
+{
+	my ($self, $to, $subject, $body, $cc, $bcc, $flags) = @_;
+
+	$cc  ||= '';
+	$bcc ||= '';
+	$flags ||= 0;
+
+	unless ($self->{_logged_in}) {
+		$self->login;
+	}
+
+	my $compose_uri = $self->{STORED_URIS}->{compose};
+
+	if (!$compose_uri) {
+		my $p = new HTML::LinkExtor(
+				sub
+				{
+					my ($tag, $type, $uri) = @_;
+					if ($type eq 'href' && $uri =~ /$COMPOSE_APP_NAME/i) {
+						$self->{STORED_URIS}->{compose} = $uri;
+						$compose_uri = $uri;
+					}
+				},
+				$self->{STORED_URIS}->{welcome} || $self->{_server});
+
+		$p->parse($self->{STORED_PAGES}->{welcome});
+	}
+
+	if (!$compose_uri) {
+		warn "send: Couldn't get compose URI.\n";
+		return undef;
+	}
+
+	my $compose_page = $self->{STORED_PAGES}->{compose};
+	
+	unless ($compose_page) {
+		my $compose_resp = $self->_get_a_page($compose_uri);
+		$compose_page = $compose_resp->content;
+	}
+
+	unless ($compose_page) {
+		warn "send: Unable to retrieve compose page.\n";
+		return undef;
+	}
+
+
+	my $p = new HTML::FormParser;
+
+	my @compose_params;
+
+	my $pobj = $p->parse($compose_page, 
+				start_form => sub {
+					my ($attr, $origtext) = @_;
+					$self->{STORED_URIS}->{send} = $attr; 
+				},
+				start_input => sub {
+					my ($attr, $origtext) = @_;
+					if ($attr->{name} eq $COMPOSE_TO_FIELD) {
+						$attr->{value} = $to;
+					} elsif ($attr->{name} eq $COMPOSE_CC_FIELD) {
+						$attr->{value} = $cc;
+					} elsif ($attr->{name} eq $COMPOSE_BCC_FIELD) {
+						$attr->{value} = $bcc;
+					} elsif ($attr->{name} eq $COMPOSE_SUBJ_FIELD) {
+						$attr->{value} = $subject;
+					} elsif ($attr->{name} eq $COMPOSE_BODY_FIELD) {
+						$attr->{value} = $body;
+					} elsif ($attr->{name} eq $COMPOSE_SAVE_COPY) {
+						$attr->{value} = $flags & SAVE_COPY_TO_SENT_FOLDER ? 'yes' : 'no';
+					}
+					push @compose_params, $attr;
+				},
+				start_textarea => sub {
+					my ($attr, $origtext) = @_;
+					if ($attr->{name} eq $COMPOSE_BODY_FIELD) {
+						$attr->{value} = $body;
+					}
+					push @compose_params, $attr;
+				}
+				
+
+			);
+
+
+	my @params;
+	for (@compose_params) {
+		next unless $_->{name};
+		push @params, "$_->{name}=$_->{value}";
+#		warn "Compose: $_->{name}=$_->{value}\n";
+	}
+
+	my $uri = make_host($self->{STORED_URIS}->{welcome});
+	$uri .= $self->{STORED_URIS}->{send}->{action};
+	$uri =~ s/https/http/g;
+	my $meth = $self->{STORED_URIS}->{send}->{method};
+
+	$self->debug("Sending '$subject' to ", join($to, $cc, $bcc)) if $self->trace;
+
+	my $info = $self->_get_a_page($uri, $meth, \@params);
+	my $recvd = $info->content;
+
+	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . "\\($subject\\)"
+			. $COMPOSE_SENT_OK_POST;
+
+	if ($recvd =~ /$check_sent_ok/) {
+		$self->debug("Sent '$subject' to ", join($to, $cc, $bcc)) if $self->trace;
+		return 1;
+	}
+	warn "send: Sent message page did not contain expected string. Message may not have been sent successfully.\n";
+	return 0;
+
+}
+
 
 
 
@@ -582,7 +755,6 @@ sub _get_a_page
 	$method ||= 'GET';
 	$method =~ tr/a-z/A-Z/;
 
-#	$uri =~ s/https/http/g;
 
 	my $req = new HTTP::Request($method, $uri);
 
@@ -594,10 +766,10 @@ sub _get_a_page
 			push @vars, "$name=" . CGI::escape($value);
 		}
 		my $char = $method eq 'GET' ? '&' : "\n";
+#FIXME: For some reason POST doesn't like \n-separated content :/
 		$char = '&';
 		$post_content = join $char, @vars;
 	}
-
 
 
 	if ($post_content) {
@@ -612,10 +784,12 @@ sub _get_a_page
 
 	}
 
-	$self->debug(" requesting uri '$uri' via $method.") if $self->trace;
-	$self->debug(" parameters: $post_content") if $post_content && $self->trace;
+	$self->debug(" requesting uri '$uri' via $method.") if $self->trace > 1;
+	$self->debug(" parameters: $post_content")
+		if $post_content && $self->trace > 3;
 
-	$self->debug(" Request: === \n", $req->as_string, "===\n") if $self->trace > 12;
+	$self->debug(" Request: === \n", $req->as_string, "===\n")
+		if $self->trace > 4;
 
 	$req->header(pragma => 'no-cache');
 
@@ -627,20 +801,17 @@ sub _get_a_page
 	$req->header(Cache_Control => 'no-cache');
 	$req->header(Referer => 'file://none.html');
 	
-#	$self->{_cookie_jar}->add_cookie_header($req);
+##	$self->{_cookie_jar}->add_cookie_header($req);
 	my $resp = $self->{_ua}->request($req);
 
 	$self->{_cookie_jar}->extract_cookies($resp);
 	$self->{_cookie_jar}->save;
 	
-	$self->debug(" Response = \n", $resp->as_string, "\n =\n") if $self->trace > 9;
-	$self->debug(" returned code ", $resp->code, ".") if $self->trace;
-	if ($self->trace > 1) {
-		$self->debug(" request uri ", $resp->request->url);
-	}
-	if ($self->trace > 8) {
-		$self->debug(" request contents ", $resp->content);
-	}
+##	$self->debug(" Response:\n", $resp->as_string, "\n\n") if $self->trace > 9;
+	$self->debug(" returned code ", $resp->code, ".")      if $self->trace > 2;
+
+	$self->debug(" request uri ", $resp->request->url)     if $self->trace > 4;
+	$self->debug(" request contents ", $resp->content)     if $self->trace > 9;
 
 # FIXME: Not sure about this guy. Seems like redirects are always gonna be
 # GETs even if the original request was a POST. Little bit of hokum from Yahoo
@@ -648,7 +819,7 @@ sub _get_a_page
 	if ($resp->code == 302) {
 		$uri = $resp->header('Location');
 		$self->debug(" 302 (Moved Temporarily) to $uri encountered.")
-			if $self->trace > 3;
+			if $self->trace > 2;
 		return $self->_get_a_page($uri, 'GET', $params);
 	}
 	
@@ -657,11 +828,27 @@ sub _get_a_page
 
 
 
+
 sub debug
 {
 	my $self = shift;
 	warn __PACKAGE__, ": @_\n";
 }
+
+
+
+sub make_host
+{
+	my ($self, $uri) = @_;
+	
+	if (ref($self) ne __PACKAGE__) {
+		$uri = $self;
+	}
+	my $url = new URI::URL($uri);
+	return $url->scheme . '://' . $url->host . ':' . $url->port;
+}
+
+
 
 
 1;
@@ -675,7 +862,7 @@ Mail::Webmail::Yahoo - Enables bulk download of yahoo.com -based webmail.
 =head1 SYNOPSIS
 
   use Mail::Webmail::Yahoo;
-  $yahoo = Mail::Webmail::Yahoo->new(%options);
+  $yahoo = Mail::WebMail::Yahoo->new(%options);
   @folders = $yahoo->get_folder_list();
   @messages = $yahoo->get_mail_messages('Inbox', 'all');
   # Write messages to disk here, or do something else.
@@ -712,10 +899,12 @@ in here for hysterical raisins.
 
 =item $yahoo->login();
 
-Mondo method which performs the 'login' stage of connecting to the site. This
+Method which performs the 'login' stage of connecting to the site. This
 method can take a while to complete since there are at least several
 re-directs when logging in to Yahoo. 
 
+Returns 0 if already logged in, 1 if successful, otherwise sets $@ and returns
+undef.
 
 
 =item @headers = $yahoo->get_mail_headers($folder, $callback);
@@ -769,8 +958,33 @@ since the messages returned are not in a very friendly form.
 
 =item @folders = $yahoo->get_folder_list();
 
-Returns a list of folders in the account. Logs the user in if not already
-done.
+Returns a list of folders in the account. Logs the user in if necessary.
+
+
+=item $ok = $yahoo->send($to, $subject, $body, $cc, $bcc, $flags);
+
+Attempts to send a message to the recipients listed in $to, $cc, and $bcc,
+with the specified subject and body text. Logs the user in if necessary.
+
+$flags may contain any combination of the constants exported by this package.
+Currently, these constants are:
+
+  SAVE_COPY_TO_SENT_FOLDER  :    saves a copy of a sent message
+
+cc and bcc come after subject and body in the parameter list (instead of with
+'to') since it is expected that
+  
+  send(to, subject, body)
+
+will be more common than sending to cc or bcc recipients - at least, this is
+how it is in my experience.
+
+
+$to, $cc and $bcc should contain comma-separated lists of email addresses,
+since this is what Yahoo prefers; as of this version, address-book lookups are
+not supported.
+
+As of this version, mail attachments are not supported.
 
 
 =item $resp = $yahoo->_get_a_page($uri, $method, $params);
@@ -789,6 +1003,27 @@ call.
 Returns the response object if no error occurs, otherwise undef.
 
 
+=item $current_trace_level = $yahoo->trace($new_trace_level);
+
+if $new_trace_level exists, sets the new level for tracing the operation of
+the object. Returns the current trace level (i.e. before setting a new one).
+
+Trace levels are:
+
+   0   no tracing output; warning messages only.
+ > 0   informative messages only ("what I am doing")
+ > 1   URIs being fetched
+ > 2   request response codes
+ > 3   request parameters
+ > 4   any other 'extra' debugging info.
+ > 9   request response content
+
+
+=item $yahoo->debug(...);
+
+Sends debugging messages to STDERR, appended with a newline.
+
+
 =back
 
 
@@ -799,12 +1034,13 @@ therefore be called using the -> operator.
 
 =head2 CAVEATS
 
-o  The 'download attachments' feature currently only works for
-'multipart/mixed' mime types. This will probably be expanded in a future
-version.
+There is an issue somewhere that prevents https redirects from succeeding.
+Until this is fixed, the login procedure WILL expose the username and password
+in plain text over the network. 
 
-o  The user interface of Yahoo webmail is fairly configurable. It is possible
-the module may not work out-of-the-box with some configurations. It should,
+
+The user interface of Yahoo webmail is fairly configurable. It is possible the
+module may not work out-of-the-box with some configurations. It should,
 however, be possible to tweak the settings at the top of the file to allow
 conformance to any configuration. 
 
