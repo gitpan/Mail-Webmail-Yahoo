@@ -8,3 +8,6 @@ Revision history for Perl extension Mail::Webmail.
 	- Main functionality complete.
 	- First version released.
 
+0.11  Mon Jun 17 11:42:26 2002
+	- Added Class::MethodMaker dependency to Makefile.PL
+

@@ -16,6 +16,7 @@ WriteMakefile(
 			HTML::FormParser => 0.1,
 			HTML::TableExtractor => 0.1,
 			HTML::TableContentParser => 0.1,
+			Class::MethodMaker  => 0.1,
 		}, # e.g., Module::Name => 1.1
 
     ($] >= 5.005 ?    ## Add these new keywords supported since 5.005

@@ -14,7 +14,7 @@ use warnings;
 require Exporter;
 our @ISA = qw(Exporter);
 
-our $VERSION = 0.1;
+our $VERSION = 0.11;
 
 # This is an object-based package. We export nothing.
 our @EXPORT_OK = ();
