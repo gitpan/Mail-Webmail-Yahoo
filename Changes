@@ -1,13 +1,15 @@
 Revision history for Perl extension Mail::Webmail.
 
-0.01  Wed Apr 24 18:48:45 2002
-	- original version; created by h2xs 1.21 with options
-		-X -n Mail::Webmail
+0.12  Sun Jun 30 10:07:33 2002
+  - Fixed bug in login page download.
+
+0.11  Mon Jun 17 11:42:26 2002
+	- Added Class::MethodMaker dependency to Makefile.PL
 
 0.1   Sat Jun 15 16:30:22 2002
 	- Main functionality complete.
 	- First version released.
 
-0.11  Mon Jun 17 11:42:26 2002
-	- Added Class::MethodMaker dependency to Makefile.PL
-
+0.01  Wed Apr 24 18:48:45 2002
+	- original version; created by h2xs 1.21 with options
+		-X -n Mail::Webmail

@@ -14,7 +14,7 @@ use warnings;
 require Exporter;
 our @ISA = qw(Exporter);
 
-our $VERSION = 0.11;
+our $VERSION = 0.12;
 
 # This is an object-based package. We export nothing.
 our @EXPORT_OK = ();
@@ -198,6 +198,7 @@ sub login
 	my $pobj = $p->parse($welcome_page, 
 				form => sub {
 					my ($attr, $origtext) = @_;
+					return if lc $attr  eq '</form>';
 					$self->{STORED_URIS}->{login_page} = $attr; 
 				},
 				input => sub {
@@ -220,6 +221,7 @@ sub login
 		next unless $_->{name};
 		push @params, "$_->{name}=$_->{value}";
 	}
+
 
 
 # This bit makes the actual request to login, having stuffed the @params array
@@ -289,9 +291,6 @@ sub get_mail_messages
 			my $from_date = '';
 
 # Remove as much crap as possible from the page before parsing it..
-			open SMIT, ">tmp/full_$mcount";
-			print SMIT $page;
-			close SMIT;
 			$page =~ s{.+$MESSAGE_START_STRING(.+)$MESSAGE_END_STRING.+}{$1}sig;
 
 			for my $t (@$stored_tables) {
