@@ -43,7 +43,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.20;
+our $VERSION = 0.21;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -87,8 +87,14 @@ our $COMPOSE_SUBJ_FIELD  = 'Subj';
 our $COMPOSE_BODY_FIELD  = 'Body';
 our $COMPOSE_SAVE_COPY   = 'SaveCopy';
 
-our $COMPOSE_SENT_OK_PRE = 'Your\s+mail\s*';
-our $COMPOSE_SENT_OK_POST= '\s*has\s+been\s+sent\s+to';
+##our $COMPOSE_SENT_OK_PRE = 'Your\s+mail\s*';
+##our $COMPOSE_SENT_OK_POST= '\s*has\s+been\s+sent\s+to';
+
+# New Version of Yahoo
+our $COMPOSE_SENT_OK_PRE = '<td class=mtitle>Message Sent</td>';
+our $COMPOSE_SENT_OK_POST= '';
+
+
 
 
 ## Flag names & values. Used when sending, among other things.
@@ -289,11 +295,12 @@ sub login
 
 	my $logged_in_uri = $info->request->url;
 
-	$self->{STORED_URIS}->{welcome} = make_host($logged_in_uri);
-
+	$self->{STORED_URIS}->{base} = make_host($logged_in_uri);
+	$self->{STORED_URIS}->{welcome} = $logged_in_uri;
 
 	$self->debug(" logged in.") if $self->trace;
-	$self->debug("Welcome URI is $logged_in_uri") if $self->trace > 4;
+	$self->debug("Base URI is $self->{STORED_URIS}->{base}") if $self->trace > 4;
+	$self->debug("Welcome URI is $self->{STORED_URIS}->{welcome}") if $self->trace > 4;
 	$self->{_logged_in} = 1;
 
 	return 1;
@@ -373,7 +380,7 @@ sub get_mail_messages
 
 							chomp $data;
 
-# 'From' header has 'block address crap in it..
+# 'From' header has block address crap in it..
 							if ($field =~ /From/) {
 								$data =~ s/\&nbsp;\|.*//g;
 
@@ -520,6 +527,7 @@ sub get_folder_index
 	}
 
 	my $uri = $self->{STORED_URIS}->{folder_list}->{$mbox};
+	$self->debug("INDEX URI for $mbox: $uri");
 	my $info = $self->_get_a_page($uri);
 	my $index = $info->content;
 
@@ -567,7 +575,7 @@ sub _get_message_links
 						};
 				}
 			},
-			$self->{STORED_URIS}->{folder} || $self->{_server});
+			$self->{STORED_URIS}->{base});
 
 	$p->parse($page);
 
@@ -595,10 +603,12 @@ sub get_folder_list
 				{
 					my ($tag, $type, $uri) = @_;
 					if ($type eq 'href' && $uri =~ /$FOLDER_APP_NAME\?/) {
-						$self->{STORED_URIS}->{front_page} = $uri;
+						$self->debug("FRONT PAGE: $uri") if $self->trace > 4;
+						$self->{STORED_URIS}->{front_page} = 
+							$uri;
 					}
 				},
-				$self->{STORED_URIS}->{folder} || $self->{_server});
+				$self->{STORED_URIS}->{base});
 
 		$p->parse($index);
 	}
@@ -613,11 +623,11 @@ sub get_folder_list
 					my ($tag, $type, $uri) = @_;
 					if ($type eq 'href' &&
 							$uri =~ /$SHOW_FOLDER_APP_NAME\?.*box=([^\&]*)/) {
-						$self->debug(" get_folder_list: $uri") if $self->trace > 4;
 						$self->{STORED_URIS}->{folder_list}->{$1} = $uri;
+						$self->debug(" get_folder_list: $self->{STORED_URIS}->{folder_list}->{$1} for $1") if $self->trace > 4;
 					}
 				},
-				$self->{STORED_URIS}->{folder} || $self->{_server});
+				$self->{STORED_URIS}->{base});
 
 		$p->parse($indp);
 	}
@@ -652,7 +662,7 @@ sub send
 						$compose_uri = $uri;
 					}
 				},
-				$self->{STORED_URIS}->{welcome} || $self->{_server});
+				$self->{STORED_URIS}->{base});
 
 		$p->parse($self->{STORED_PAGES}->{welcome});
 	}
@@ -717,7 +727,6 @@ sub send
 	for (@compose_params) {
 		next unless $_->{name};
 		push @params, "$_->{name}=$_->{value}";
-#		warn "Compose: $_->{name}=$_->{value}\n";
 	}
 
 	my $uri = make_host($self->{STORED_URIS}->{welcome});
@@ -730,8 +739,11 @@ sub send
 	my $info = $self->_get_a_page($uri, $meth, \@params);
 	my $recvd = $info->content;
 
-	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . "\\($subject\\)"
-			. $COMPOSE_SENT_OK_POST;
+##	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . "\\($subject\\)"
+##			. $COMPOSE_SENT_OK_POST;
+
+## New version of Yahoo doesn't use the subject in sent confirmation..
+	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . $COMPOSE_SENT_OK_POST;
 
 	if ($recvd =~ /$check_sent_ok/) {
 		$self->debug("Sent '$subject' to ", join($to, $cc, $bcc)) if $self->trace;

@@ -28,7 +28,7 @@ my $yahoo = new Mail::Webmail::Yahoo(
 $| = 1;
 
 
-$yahoo->trace(3);
+$yahoo->trace(10);
 
 my $to   = $ARGV[2] or &usage, die; 
 my $subj = $ARGV[3] or &usage, die; 
