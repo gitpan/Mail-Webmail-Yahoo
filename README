@@ -53,6 +53,11 @@ where to-list is a comma-separated list of email addresses.
 
 INSTALLATION
 
+Note: This module requires a secure sockets layer library (such as openssl,
+available from www.openssl.org) and a perl wrapper for such. I recommend
+Crypt::SSLeay
+
+
 To install this module type the following:
 
    perl Makefile.PL
@@ -65,6 +70,7 @@ DEPENDENCIES
 This module requires these other modules and libraries:
 
 	LWP::UserAgent
+	Crypt::SSLeay or other SSL wrapper/ library
 	HTTP::Request
 	HTTP::Headers
 	HTTP::Cookies

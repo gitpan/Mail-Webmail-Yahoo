@@ -1,5 +1,8 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.22  Sat Oct 12 14:36:06 EDT 2002
+  - Fixed problem with not loading pages correctly.
+
 0.21  Fri Aug  9 21:03:23 EDT 2002
   - Changed some parameters to match latest Yahoo interface.
 
