@@ -27,27 +27,20 @@ package. It allows you to download to your local machine all of the messages
 in your Yahoo account, attachments included. Future versions will allow bulk
 deletion, forwarding, and other useful mail functions.
 
-This is version 0.4 of the Mail::Webmail::Yahoo package; it may be slightly
+This is version 0.6 of the Mail::Webmail::Yahoo package; it may be slightly
 brittle. While I have been testing it and using it on my own yahoo
 accounts for several weeks, I would appreciate any feedback, positive or
 negative.
 
+Older versions of this package used 'snagmail.pl' and 'sendhoo.pl' to perform
+message retrieval and send duties. These have now been rolled into a much
+enhanced 'yahootils.pl' application. They remain in the distribution but will
+be removed at some future date.
 
-Included in the distribution is a sample script, 'snagmail.pl', which should
-be enough to get you started. It simply downloads the contents of your Yahoo
-inbox and stores it to disk in mbox format. 
+yahootils.pl comes with full instructions included. To see all available
+options, call
 
-Call it with 
-
-  snagmail.pl <yahoo username> <password> [<number of messages>]
-
-
-Also included is 'sendhoo.pl', which can be used to send simple messages via
-your yahoo account. Usage is:
-
-  sendhoo.pl <yahoo username> <yahoo password> <to-list> <subject> <body>
-
-where to-list is a comma-separated list of email addresses.
+  yahootils.pl --help
 
 
 INSTALLATION
@@ -97,4 +90,12 @@ DISCLAIMER
 
 This module is not published or authorised by Yahoo Inc. in any way. Please DO
 NOT contact Yahoo Inc. regarding use of this software. 
+
+CAVEATS
+
+There may be some issues with messages converted from HTML to plaintext. This
+is due to the way HTML::Element renders as_text(), although I expect to tidy
+it up in future. Generally if the message has the correct content type, things
+should for the most part work as expected.
+
 

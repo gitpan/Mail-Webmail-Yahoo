@@ -1,7 +1,7 @@
-#  (C)  Simon Drabble 2002 - 2003
-#  sdrabble@cpan.org   2002-03-22
+#  (C)  Simon Drabble  2002,2003
+#  sdrabble@cpan.org  2002/03/22
 
-#  $Id: Yahoo.pm,v 1.19 2003/01/18 03:53:07 simon Exp $
+#  $Id: Yahoo.pm,v 1.30 2003/10/10 15:44:03 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
@@ -24,10 +24,13 @@ our @ISA = qw(Exporter);
 # values.
 our @EXPORT_OK = ();
 our @EXPORT = qw(
+		YAHOO_MSG_FLAGS
 		SAVE_COPY_TO_SENT_FOLDER
 		SUPPRESS_BANNERS
 		DELETE_ON_READ
 		MOVE_ON_READ
+		ATTACH_SIG
+		SEND_AS_HTML
 );
 
 
@@ -52,7 +55,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.401;
+our $VERSION = 0.600;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -62,6 +65,9 @@ use Class::MethodMaker
 # passable on the command line, or overrideable in the calling app. They will
 # (hopefully) never change, but if they do, it would be better for the user to
 # edit a simple configuration file than modify (possibly system-wide) code.
+
+# TODO: future ver: have all relevant items in resource file (localisable?)
+# thus few (if any) code changes needed if Yahoo change page layout (again)
 
 # Config specific to this package.
 our $USER_AGENT = "Yahoo-Webmail/$VERSION";
@@ -74,10 +80,13 @@ our $LOGIN_SERVER         = 'http://mail.yahoo.com';
 
 our $FOLDER_APP_NAME      = 'Folders';
 our $SHOW_FOLDER_APP_NAME = 'ShowFolder';
+our $EMPTY_FOLDER_APP_NAME= 'ShowFolder';
 our $SHOW_MSG_APP_NAME    = 'ShowLetter';
 our $SHOW_TOC             = qr{toc=[^\&]*};
 
-our $FULL_HEADER_FLAG     = 'Nhead=f&head=';
+our $ATTACH_SECTION       = '#attachments';
+
+our $FULL_HEADER_FLAG     = 'Nhead=f&head=f';
 our $EMPTY_FULL_HEADER_FLAG = qr{head=[^\&]*&?};
 
 our $LOGIN_FIELD          = 'login';
@@ -98,6 +107,8 @@ our $COMPOSE_BCC_FIELD   = 'Bcc';
 our $COMPOSE_SUBJ_FIELD  = 'Subj';
 our $COMPOSE_BODY_FIELD  = 'Body';
 our $COMPOSE_SAVE_COPY   = 'SaveCopy';
+our $COMPOSE_ATTACH_SIG  = 'SigAtt';
+our $COMPOSE_SEND_HTML   = 'Format';
 our $COMPOSE_MONEY_FIELD = 'Money';
 our $COMPOSE_SEND_MONEY_CHK = 'SendMoney';
 
@@ -117,27 +128,41 @@ our $MOVE_TO_FOLDER_NAME = 'destBox';
 
 
 ## Flag names & values. Used when sending, among other things.
-use constant SAVE_COPY_TO_SENT_FOLDER => 1;
-use constant SUPPRESS_BANNERS         => 2;
-use constant DELETE_ON_READ           => 4; # This and MOVE_ON_READ are
-use constant MOVE_ON_READ             => 8; # mutually exclusive.
+use constant SAVE_COPY_TO_SENT_FOLDER =>  1;
+use constant SUPPRESS_BANNERS         =>  2;
+use constant DELETE_ON_READ           =>  4; # This and MOVE_ON_READ are
+use constant MOVE_ON_READ             =>  8; # mutually exclusive.
+use constant ATTACH_SIG               => 16;
+use constant SEND_AS_HTML             => 32;
+##use constant GET_UNREAD_ONLY          => 64; # Not Yet Implemented..
 
+use constant YAHOO_MSG_FLAGS => qw(
+		SAVE_COPY_TO_SENT_FOLDER
+		SUPPRESS_BANNERS
+		DELETE_ON_READ
+		MOVE_ON_READ
+		ATTACH_SIG
+		SEND_AS_HTML
+		);
 
 
 # ick.
-our $DOWNLOAD_FILE_LINK = q{\s*<a href="(/ym/ShowLetter/[^"]+)">\s*<b><font[^>]*>\s*Download File\s*</b>\s*</a>};
+our $ATTACH_PRE = q{\s*<a href="?(/ym/ShowLetter/[^"]+)"?\s*>};
+our $ATTACH_POST= q{(?<!</a>)</a>};
+our $DOWNLOAD_FILE_LINK  = qr{${ATTACH_PRE}Download File${ATTACH_POST}};
+our $DOWNLOAD_FILE_LINK2 = qr{${ATTACH_PRE}Download Without Scan${ATTACH_POST}};
 
 
+# Used for matching (actually, removing anything not) email addresses
+our $NAME_PART  = qr{("?[\w\s]+"?)?};
+our $EMAIL_PART = qr{(<?[\w.]+\@\w+\.[\w.]+>?)};
+#our $CLEAN_FROM = qr{(^From:)(?!$NAME_PART)?($NAME_PART)(?!$EMAIL_PART)?($EMAIL_PART).*};
 
-our $NEXT_MESSAGES_LINK = q{
-showing \d+-\d+ of \d+
-\| <a href="(/ym/ShowFolder[^"]+)">Next</a>
-};
 
+## http://us.f406.mail.yahoo.com/ym/ShowFolder?Search=&Npos=1&next=1&YY=88041&inc=200&order=down&sort=date&pos=0&view=a&head=b&box=Inbox
+our $NEXT_MESSAGES_LINK = qr{[^<"]*ShowFolder\?Search.*?&next=1[^>"']*};
+our $PREV_MESSAGES_LINK = qr{[^<"]*ShowFolder\?Search.*?&previous=1[^>"']*};
 
-our $MESSAGE_START_STRING = qr{<div id=['"]?message['"]?>};
-
-our $MESSAGE_END_STRING = qr{</div>};
 
 
 sub new
@@ -159,6 +184,7 @@ sub new
 		_ua            => $ua,
 		_html_parser   => new Textractor,
 	}, $class;
+
 
 	if ($args{retrieve}) {
 		warn __PACKAGE__, ": new: use of 'retrieve' parameter is deprecated and will be ignored.\n";
@@ -184,6 +210,7 @@ sub new
 	$self->cache_messages(1);
 	$self->cache_headers(1);
 
+# FIXME: why?
 	$self->trace(0);
 	
 	return $self;
@@ -196,7 +223,7 @@ sub connect
 	return 0 if $self->{_connected};
 
 # FIXME: really connect if necessary.
-	$self->debug(" connected.") if $self->trace;
+	$self->debug("connected.") if $self->trace;
 	$self->{_connected} = 1;
 }
 
@@ -263,6 +290,7 @@ sub login
 # with the fields gleaned from the login page (plus our username and password
 # of course). Note that there is some feature in LWP that doesn't like
 # redirects from https, so we have to give it an insecure URI here.
+# (might be a POST issue - worked ok in other code)
 # FIXME: track this down; provide a secure work-around.
 	$uri = $self->{STORED_URIS}->{login}->{action};
 	$uri =~ s/https/http/g;
@@ -297,19 +325,12 @@ sub login
 	$self->{STORED_URIS}->{base} = make_host($logged_in_uri);
 	$self->{STORED_URIS}->{welcome} = $logged_in_uri;
 
-	$self->debug(" logged in.") if $self->trace;
+	$self->debug("logged in.") if $self->trace;
 	$self->debug("Base URI is $self->{STORED_URIS}->{base}") if $self->trace > 4;
 	$self->debug("Welcome URI is $self->{STORED_URIS}->{welcome}") if $self->trace > 4;
 	$self->{_logged_in} = 1;
 
 	return 1;
-}
-
-
-sub get_mail_headers
-{
-	warn "get_mail_headers is deprecated -- use get_mail_messages instead.\n";
-	shift->get_mail_messages(@_);
 }
 
 
@@ -362,6 +383,8 @@ sub get_mail_messages
 
 	my @message_nums;
 
+# FIXME: confusing? bleh. could be construed as 'message numbers' or
+# 'start..end'.
 	if (ref($msg_list) eq 'ARRAY') { 
 		@message_nums = @{$msg_list};
 		$self->debug("Fetching messages numbered @message_nums") if $self->trace;
@@ -375,6 +398,13 @@ sub get_mail_messages
 		++$mcount;
 		next unless @message_nums && grep { $_ == $mcount } @message_nums;
 
+# Change the program name to display the number of the current message, if
+# supported.
+		(my $prog = $0) =~ s/\s+\d+\s+messages//g;
+		$prog .= ' ' . (0+@messages) . ' messages';
+		$0 = $prog;
+
+
 		my $uri = $_->{uri};
 		$uri =~ s/$EMPTY_FULL_HEADER_FLAG//g;
 		$uri .= "&" . $FULL_HEADER_FLAG;
@@ -387,113 +417,7 @@ sub get_mail_messages
 		if ($page) {
 
 			$self->debug("Processing page at $uri") if $self->trace;
-
-			my @hdrs;
-
-			my $p = new HTML::TableContentParser;
-			my $stored_tables = $p->parse($page);
-
-			my $from_date = '';
-
-# Change the program name to display the number of the current message, if
-# supported.
-			(my $prog = $0) =~ s/\s+\d+\s+messages//g;
-			$prog .= ' ' . (0+@messages) . ' messages';
-			$0 = $prog;
-
-
-#			print SIMONLOG "sdd 025.$mcount; ($page)\n";
-
-			for my $t (@$stored_tables) {
-				next unless $t->{rows};
-
-				for my $r (@{$t->{rows}}) {
-					next unless $r->{cells};
-
-					for my $c (0..@{$r->{cells}}-1) {
-
-# We're only interested in data that contains a message header, and the field
-# associated with it -- but there may be a bunch of other crap stuck in by
-# yahoo that 'looks like' a message header. So we validate against a known
-# list of message headers. The first check is faster than examining every item
-# of data through the grep.
-
-						next unless my $field = $r->{cells}->[$c]->{data};
-						my $data  = $r->{cells}->[$c+1]->{data};
-
-						my $mp = new Mail::Webmail::MessageParser;
-						my $hdr = $mp->parse_header($field, $data);
-						$mp->delete(); # Free allocated memory
-						next unless $hdr;
-						++$c;
-
-# 'From' header has 'block address' and other crap in it..
-						if ($hdr =~ /^From/) {
-							# remove everything after a | or  (\240) character
-							$hdr =~ s/((\&nbsp;)|(\s*))?(\||\240).*//g;
-
-# Also add a 'From' line so pine et al recognise it as a message.
-							my ($from) = $hdr =~ /:\s*(.*)/;
-							$from =~ s/".*"//g;
-							$from =~ s/<|>//g;
-
-							push @hdrs, "From $from";
-
-						} elsif ($hdr =~ /Date/) {
-# Sometimes the date field gets molestered..
-							if ($hdr =~ /$DATE_MOLESTERED_STRING/) {
-								$hdr = ' ' . scalar localtime time;
-							}
-#							($from_date = $data) =~ s/,//g;
-							$from_date =  ' ' . scalar localtime time;
-						}
-
-						push @hdrs, $hdr;
-					}
-				}
-			}
-# Add the Yahoo message Id - this might come in useful.
-			push @hdrs, "X-Yahoo-MsgId: $yahoo_msg_id";
-
-# Sort the headers so 'From' comes first..
-			my $hdr = [sort { $a =~ /^From\s+/ ? -1 : 1 } @hdrs];
-# ..and add the date to the 'From' header, so it looks like mail.
-			$hdr->[0] .= $from_date;
-			my $mhdr = new Mail::Internet($hdr);
-
-			push @messages, $mhdr;
-
-# So much for the header, now for the body.. Yahoo kindly provides 
-# <div id=message> at the top, but the bottom is just a </div>. So we have to
-# hope the HTML is correctly formed, or at least those parts of it - a stray
-# </div> inside the message body will cause problems. See the documentation
-# for MessageParser for more.
-			my $mp = new Mail::Webmail::MessageParser;
-			$mp->message_start(_tag => 'div', id => 'message');
-			my $body = $mp->parse_body_as_text($page);
-			$mp->delete();
-
-# Set the body. Grue. I kinda think it would be nice if $mhdr->print_body
-# could be given a delimiter to print between each pair of elements.
-			my @body = map { "$_\n" } split /\n/, $body;
-			$mhdr->body(@body);
-
-# Check for downloadable attachments, mime-encode, and stuff into the message
-# using some magic to set content types etc.
-			while ($page =~ s{$DOWNLOAD_FILE_LINK}{}si) {
-				my $download_link = $1;
-				my $url = make_host($_->{uri});
-				$download_link .= $FULL_HEADER_FLAG;
-				my $link = $url . $download_link;
-				my $att = $self->download_attachment($link, $mhdr);
-			}
-
-			print 0+@messages, " messages\n" if (!(@messages % 20));
-
-# ## _retrieve mechanism is deprecated.
-#			if ($self->{_retrieve} =~ /^(\d+)$/  && @messages >= $1) {
-#				return @messages
-#			}
+			push @messages, $self->_process_message($page, $yahoo_msg_id);
 
 			if ($flags & DELETE_ON_READ) {
 				my $uri = $self->{STORED_URIS}->{base} .
@@ -525,12 +449,168 @@ sub get_mail_messages
 
 
 
+sub _process_message
+{
+	my ($self, $page, $yahoo_msg_id) = @_;
+
+	my $mhdr = $self->_extract_headers($page, $yahoo_msg_id);
+	if ($mhdr) {
+		$self->_extract_body($mhdr, $page);
+	}
+
+###	push @messages, $mhdr;
+###	print 0+@messages, " messages\n" if (!(@messages % 20));
+
+	return $mhdr;
+}
+
+
+
+sub _extract_headers
+{
+	my ($self, $page, $yahoo_msg_id) = @_;
+	my @hdrs;
+
+	my $p = new HTML::TableContentParser;
+	my $stored_tables = $p->parse($page);
+
+	my $from_date = '';
+
+
+#			print SIMONLOG "sdd 025.$mcount; ($page)\n";
+
+	for my $t (@$stored_tables) {
+		next unless $t->{rows};
+
+		for my $r (@{$t->{rows}}) {
+			next unless $r->{cells};
+
+			for my $c (0..@{$r->{cells}}-1) {
+
+# We're only interested in data that contains a message header, and the field
+# associated with it -- but there may be a bunch of other crap stuck in by
+# yahoo that 'looks like' a message header. So we validate against a known
+# list of message headers. The first check is faster than examining every item
+# of data through the grep.
+
+				next unless my $field = $r->{cells}->[$c]->{data};
+				my $data  = $r->{cells}->[$c+1]->{data};
+
+				my $mp = new Mail::Webmail::MessageParser;
+				$mp->{_debug} = $self->trace;
+				my $hdr = $mp->parse_header($field, $data);
+				$mp->delete(); # Free allocated memory
+				next unless $hdr;
+				++$c;
+
+# 'From' header has 'block address' and other crap in it..
+				if ($hdr =~ /^From/) {
+# Remove everything not looking like an email address..
+# Make no attempt to validate the address; just remove non-compliant
+# characters (actually quite hard.. the address itself is all we care about,
+# really, but we'll try and get the "name" part)
+#							$hdr =~ s/((\&nbsp;)|(\s*))?(\||\240).*//g;
+#							$hdr =~ s/$CLEAN_FROM/$1 $2 $3/;
+					my ($from, $name) = $hdr =~ /(From:?)\s*($NAME_PART)/i;
+					$name ||= '';
+					my ($email)       = $hdr =~ /($EMAIL_PART)/i;
+					$hdr = "$from $name $email";
+
+# Also add a 'From' line so pine et al recognise it as a message.
+					$from = "$name $email";
+#							$from =~ s/".*"//g;
+#							$from =~ s/<|>//g;
+
+					push @hdrs, "From $from";
+
+				} elsif ($hdr =~ /Date/) {
+# Sometimes the date field gets molestered..
+					if ($hdr =~ /$DATE_MOLESTERED_STRING/) {
+						$hdr = ' ' . scalar localtime time;
+					}
+#							($from_date = $data) =~ s/,//g;
+					$from_date =  ' ' . scalar localtime time;
+				}
+
+				push @hdrs, $hdr;
+			}
+		}
+	}
+# Add the Yahoo message Id - this might come in useful.
+	push @hdrs, "X-Yahoo-MsgId: $yahoo_msg_id";
+
+# Add our own header - might be useful
+	push @hdrs, "X-Mail-Webmail-Yahoo-Version: $VERSION";
+
+# Sort the headers so 'From' comes first..
+	my $hdr = [sort { $a =~ /^From\s+/ ? -1 : 1 } @hdrs];
+# ..and add the date to the 'From' header, so it looks like mail.
+	$hdr->[0] .= $from_date;
+
+
+# Finally construct a new Mail object containing our headers and return it.
+	my $mhdr = new Mail::Internet($hdr);
+	return $mhdr;
+}
+
+
+
+sub _extract_body
+{
+	my ($self, $mhdr, $page) = @_;
+# So much for the header, now for the body.. Yahoo kindly provides 
+# <div id=message> at the top, but the bottom is just a </div>. So we have to
+# hope the HTML is correctly formed, or at least those parts of it - a stray
+# </div> inside the message body will cause problems. See the documentation
+# for MessageParser for more.
+	my $mp = new Mail::Webmail::MessageParser;
+	$mp->{_debug} = $self->trace;
+# Gets the part of the page that contains the message, as defined by Yahoo..
+	$mp->message_start(_tag => 'div', id => 'message');
+	$mp->message_read($page);
+
+# Yahoo quite decently provides a way to remove inlined attachments..
+	$mp->remove_matching(_tag => 'a', name => 'attachments');
+
+# Remove any extra HTML that might appear around the delivered body..
+	$mp->extract_body([_tag => 'table'], [_tag => 'tr'], [_tag => 'td']);
+# Yahoo gives text messages 'pre' tags..
+# Ha! We don't need to do this - the <pre> tags will get swallowed in the
+# conversion to text (as_text). Of course, this relies on the content-type
+# being set correctly..
+########	$mp->extract_body([_tag => 'pre'], [_tag => 'tt']);
+# And finally get the body text in the required form.
+	my $body = $mp->body_as_appropriate($mhdr);
+	$mp->delete();
+
+
+# Set the body. Grue. I kinda think it would be nice if $mhdr->print_body
+# could be given a delimiter to print between each pair of elements.
+	my @body = map { "$_\n" } split /\n/, $body;
+	$mhdr->body(@body);
+
+# Check for downloadable attachments, mime-encode, and stuff into the message
+# using some magic to set content types etc.
+	while ($page =~ s{$DOWNLOAD_FILE_LINK}{}si ||
+				 $page =~ s{$DOWNLOAD_FILE_LINK2}{}si) {
+		my $download_link = $1;
+		$self->debug("Attachment link: $download_link") if $self->trace > 3;
+		my $url = make_host($_->{uri});
+		$download_link .= $FULL_HEADER_FLAG;
+		my $link = $url . $download_link;
+		$self->download_attachment($link, $mhdr);
+	}
+	return 1; # no errors?
+}
+
+
+
+
 sub download_attachment
 {
 	my ($self, $download_link, $snagmsg) = @_;
 
 	my ($filename) = $download_link =~ /filename=([^\&]*)/;
-	print "Downloadable: $filename\n";
 	my $info = $self->_get_a_page($download_link);
 
 	if ($snagmsg) {
@@ -549,24 +629,35 @@ sub add_attachment_to_message
 
 	my $filedata = $att->content;
 
-	my $ct = $msg->get('Content-Type');
+	my $ct = $msg->get('Content-Type') || '';
+	$self->debug("Content-Type for $filename: $ct") if $self->trace > 3;
 
-	if ($ct !~ /multipart\/mixed/) {
+# This shouldn't happen, but can if we can't, for some reason, get the full
+# header page. 
+# TODO: write make_multipart_boundary!
+	if ($ct !~ /multipart\/mixed/i) {
 		$msg->replace('Content-Type', $self->make_multipart_boundary($msg));
 		$ct = $msg->get('Content-Type');
 	} 
-	my ($bndry) = $ct =~ /boundary="([^"]+)"/;
+
+	$ct =~ s/boundary="?([^"]+)"?//i;
+	my $bndry = $1;
 	$msg->replace('MIME-Version', '1.0');
 
 ##		--0-1260933182-1019570195=:33950
 ##			Content-Type: text/plain; charset=us-ascii
 ##			Content-Disposition: inline
 
+# TODO: tidy this up a bit
 	my @body = @{$msg->body};
-	unshift @body, "--$bndry\n",  
-		"Content-Type: text/html;  charset=us-ascii\n",
-		"Content-Disposition: inline;\n\n";
-
+	unless ($body[0] =~ m{This is a multi-part message in MIME format.}) {
+		unshift @body,
+			"This is a multi-part message in MIME format.\n\n",
+			"--$bndry\n",  
+			"Content-Type: $ct;  charset=us-ascii\n",
+			"Content-Disposition: inline;\n\n";
+	}
+	
 	my $encoded_data = MIME::Base64::encode_base64($filedata);
 
 	push @body, "--$bndry\n",
@@ -576,6 +667,12 @@ sub add_attachment_to_message
  		$encoded_data;
 	$msg->body(@body);
 	
+}
+
+
+
+sub make_multipart_boundary
+{
 }
 
 
@@ -630,7 +727,7 @@ sub get_folder_action_link
 
 	return undef unless $form_uri;
 	
-#		return link as well as store it
+#		store link as well as return it
 	my $plist = join '&', @params;
 	$form_uri .= $form_uri =~ /\?/ ? "&$plist" : "?$plist";
 	$self->{STORED_URIS}->{"${linktype}_action"} = $form_uri;
@@ -663,18 +760,31 @@ sub get_folder_index
 
 	if ($index) { push @msgs, $self->_get_message_links($index) }
 
-	my $has_more = '';
+
+# Handle 'next' and 'previous' - mail box might be set up to display in
+# reverse. We'll continue to follow the first of either type found.
+# If 'next', has_more = 1. If 'prev', has_more = -1, otherwise 0.
+	my $has_more = 0;
+	my $more_page;
 	do {
-		my ($next_page) = $index =~ /$NEXT_MESSAGES_LINK/i;
-		$has_more = $next_page ? 1 : 0;
+		if ($has_more >= 0) {
+			$more_page = ($index =~ /($NEXT_MESSAGES_LINK)/i)[0];
+			$has_more = $more_page ?  1 : 0;
+		}
+		if ($has_more <= 0) {
+			$more_page = ($index =~ /($PREV_MESSAGES_LINK)/i)[0];
+			$has_more = $more_page ? -1 : 0;
+		}
+		
 		if ($has_more) {
+			$self->debug(" following link for more messages") if $self->trace > 4;
 			my $url = new URI::URL($uri);
-			my $link = $url->scheme . '://' . $url->host . $next_page;
+			my $link = $url->scheme . '://' . $url->host . $more_page;
 			$index = $self->_get_a_page($link)->content;
 			if ($index) { push @msgs,  $self->_get_message_links($index) }
 		}
 
-	} while ($has_more);
+	} while ($has_more != 0);
 
 	return @msgs;
 }
@@ -689,9 +799,11 @@ sub _get_message_links
 			sub
 			{
 				my ($tag, $type, $uri) = @_;
-				if ($type eq 'href' &&
+# Attachment links are shown before the message subject-link.
+				if ($type eq 'href'                                 &&
 						$uri =~ /$SHOW_MSG_APP_NAME\?.*MsgId=([^\&]*)/i &&
-						$uri !~ /$SHOW_TOC/i) {
+						$uri !~ /$SHOW_TOC/i                            && 
+						$uri !~ /$ATTACH_SECTION/i) {
 					$self->debug(" get_message_list: $uri") if $self->trace > 4;
 					$self->{STORED_URIS}->{messages}->{$1} = $uri;
 # Use a separate array here rather than simply returning the keys of the
@@ -740,6 +852,9 @@ sub get_folder_list
 		$p->parse($index);
 	}
 
+# TODO: inefficient to get this more than once per session - check for folders
+# already before collecting/ parsing page again.
+
 	if ($self->{STORED_URIS}->{front_page}) {
 		my $indp = $self->{STORED_PAGES}->{index_page} ||
 			$self->_get_a_page($self->{STORED_URIS}->{front_page})->content;
@@ -748,10 +863,20 @@ sub get_folder_list
 				sub
 				{
 					my ($tag, $type, $uri) = @_;
-					if ($type eq 'href' &&
-							$uri =~ /$SHOW_FOLDER_APP_NAME\?.*box=([^\&]*)/) {
-						$self->{STORED_URIS}->{folder_list}->{$1} = $uri;
-						$self->debug(" get_folder_list: $self->{STORED_URIS}->{folder_list}->{$1} for $1") if $self->trace > 4;
+					if ($type eq 'href') {
+						if ($uri =~ /$SHOW_FOLDER_APP_NAME\?.*box=([^\&]*)/) {
+							$self->{STORED_URIS}->{folder_list}->{$1} = $uri;
+							$self->debug(" get_folder_list: $uri for $1") if $self->trace > 4;
+# Yahoo has these two special folders - Bulk & Trash. 'Empty' works magically
+# on them..
+						} elsif ($uri =~ /$EMPTY_FOLDER_APP_NAME\?.*\b?EB=1/) {
+# For some reason Yahoo names the bulk folder '%40B%40Bulk' (@B@Bulk)
+							$self->{STORED_URIS}->{empty_folder_list}->{Bulk} = $uri;
+							$self->debug(" get_folder_list: Empty: $uri for Bulk") if $self->trace > 4;
+						} elsif ($uri =~ /$EMPTY_FOLDER_APP_NAME\?.*\b?ET=1/) {
+							$self->{STORED_URIS}->{empty_folder_list}->{Trash} = $uri;
+							$self->debug(" get_folder_list: Empty: $uri for Trash") if $self->trace > 4;
+						}
 					}
 				},
 				$self->{STORED_URIS}->{base});
@@ -765,6 +890,9 @@ sub get_folder_list
 
 
 
+
+
+
 sub send
 {
 	my ($self, $to, $subject, $body, $cc, $bcc, $flags) = @_;
@@ -772,6 +900,10 @@ sub send
 	$cc  ||= '';
 	$bcc ||= '';
 	$flags ||= 0;
+
+	my $really_to  = ref($to)  eq 'ARRAY' ? join ',', @$to  : $to;
+	my $really_cc  = ref($cc)  eq 'ARRAY' ? join ',', @$cc  : $cc;
+	my $really_bcc = ref($bcc) eq 'ARRAY' ? join ',', @$bcc : $bcc;
 
 	unless ($self->{_logged_in}) {
 		if (!$self->login) {
@@ -831,24 +963,30 @@ sub send
 				},
 				start_input => sub {
 					my ($attr, $origtext) = @_;
-					if ($attr->{name} eq $COMPOSE_TO_FIELD) {
-						$attr->{value} = $to;
-					} elsif ($attr->{name} eq $COMPOSE_CC_FIELD) {
-						$attr->{value} = $cc;
-					} elsif ($attr->{name} eq $COMPOSE_BCC_FIELD) {
-						$attr->{value} = $bcc;
-					} elsif ($attr->{name} eq $COMPOSE_SUBJ_FIELD) {
-						$attr->{value} = $subject;
-					} elsif ($attr->{name} eq $COMPOSE_BODY_FIELD) {
-						$attr->{value} = $body;
-					} elsif ($attr->{name} eq $COMPOSE_MONEY_FIELD) {
-						$attr->{value} = "";
-					} elsif ($attr->{name} eq $COMPOSE_SEND_MONEY_CHK) {
-						$attr->{value} = "";
-					} elsif ($attr->{name} eq $COMPOSE_SAVE_COPY) {
-						$attr->{value} = $flags & SAVE_COPY_TO_SENT_FOLDER ? 'yes' : 'no';
+					if (my $name = $attr->{name}) {
+						if ($name eq $COMPOSE_TO_FIELD) {
+							$attr->{value} = $really_to;
+						} elsif ($name eq $COMPOSE_CC_FIELD) {
+							$attr->{value} = $really_cc;
+						} elsif ($name eq $COMPOSE_BCC_FIELD) {
+							$attr->{value} = $really_bcc;
+						} elsif ($name eq $COMPOSE_SUBJ_FIELD) {
+							$attr->{value} = $subject;
+						} elsif ($name eq $COMPOSE_BODY_FIELD) {
+							$attr->{value} = $body;
+						} elsif ($name eq $COMPOSE_MONEY_FIELD) {
+							$attr->{value} = "";
+						} elsif ($name eq $COMPOSE_SEND_MONEY_CHK) {
+							$attr->{value} = "";
+						} elsif ($name eq $COMPOSE_ATTACH_SIG) {
+							$attr->{value} = $flags & ATTACH_SIG ? 'yes' : 'no'; 
+						} elsif ($name eq $COMPOSE_SEND_HTML) {
+							$attr->{value} = $flags & SEND_AS_HTML ? 'yes' : 'no'; 
+						} elsif ($name eq $COMPOSE_SAVE_COPY) {
+							$attr->{value} = $flags & SAVE_COPY_TO_SENT_FOLDER ? 'yes' : 'no';
+						}
+						push @compose_params, $attr;
 					}
-					push @compose_params, $attr;
 				},
 				start_textarea => sub {
 					my ($attr, $origtext) = @_;
@@ -865,6 +1003,7 @@ sub send
 	my @params;
 	for (@compose_params) {
 		next unless $_->{name};
+		$_->{value} ||= '';
 		push @params, "$_->{name}=$_->{value}";
 	}
 
@@ -873,7 +1012,7 @@ sub send
 	$uri =~ s/https/http/g;
 	my $meth = $self->{STORED_URIS}->{send}->{method};
 
-	$self->debug("Sending '$subject' to ", join(' ', $to, $cc, $bcc)) if $self->trace;
+	$self->debug("Sending '$subject' to ", join(';', $really_to, $really_cc, $really_bcc)) if $self->trace;
 
 	my $info = $self->_get_a_page($uri, $meth, \@params);
 	my $recvd = $info->content;
@@ -889,13 +1028,41 @@ sub send
 	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . $COMPOSE_SENT_OK_POST;
 
 	if ($recvd =~ /$check_sent_ok/) {
-		$self->debug("Sent '$subject' to ", join($to, $cc, $bcc)) if $self->trace;
+		$self->debug("Sent '$subject' to ", join(';',$really_to, $really_cc, $really_bcc)) if $self->trace;
 		return 1;
 	}
 	warn "send: Sent message page did not contain expected string. Message may not have been sent successfully.\n";
 	return 0;
 
 }
+
+
+
+# Empties the specified magic folder - only Bulk | Trash as of 2003/10/08
+# Returns 1 on 'successful' empty, 0 otherwise.
+sub empty
+{
+	my ($self, $folder) = @_;
+	unless ($self->{_logged_in}) {
+		if (!$self->login) {
+# See notes for 'send'
+			die "empty: $@\n";
+		}
+	}
+	$self->get_folder_list;
+
+
+	my $uri = $self->{STORED_URIS}->{empty_folder_list}->{$folder};
+	if (!exists $self->{STORED_URIS}->{empty_folder_list}->{$folder}) {
+		$@ = "Can't empty folder '$folder'.";
+		return 0;
+	}
+
+	$self->_get_a_page($uri);
+
+	return 1;
+}
+
 
 
 
@@ -1008,6 +1175,7 @@ sub make_host
 1;
 
 
+# Minimal package for extracting & storing message text
 
 package Textractor;
 
@@ -1090,10 +1258,9 @@ undef.
 
 =item @headers = $yahoo->get_mail_headers($folder);
 
-***DEPRECATED***
+***REMOVED***
 
-Since this method does exactly what get_mail_messages does, it has been
-deprecated and will disappear at some future time. 
+=item @messages = $yahoo->get_mail_messages($folder);
 
 Returns an array of message headers for the $folder folder. These are mostly
 in Mail::Internet format, which is nice but involves constructing them from what
@@ -1104,10 +1271,10 @@ and builds a Mail::Internet object from each message.
 
 You can get the 'raw' headers from get_folder_index().
 
-Note that for reasons of efficiency both this method and get_mail_messages()
-both collect headers and the full text of the message, and this is cached to
-avoid having to go back to the network each time. To force a refresh, set the
-Snagmail object's cache to 0 with 
+Note that for reasons of efficiency this method collects headers and the full
+text of the message, and this is cached to avoid having to go back to the
+network each time. To force a refresh, set the Snagmail object's cache to 0
+with 
 
   $yahoo->cache_messages(0);
   $yahoo->cache_headers(0);
@@ -1115,15 +1282,51 @@ Snagmail object's cache to 0 with
 Note: There used to be a $callback parameter to this method, but since it was
 never used it has been removed.
 
+
+=item my $msg = $yahoo->_process_message($page, $yahoo_msg_id);
+
+Extracts and returns as a Mail::Internet object the headers and message body
+from the provided HTML ($page).
+
+
+=item my $msg = $yahoo->_extract_headers($page, $yahoo_msg_id);
+
+Performs the actual extraction of the message headers from the given HTML in
+$page. Pushes the $yahoo_msg_id into the headers as 'X-Yahoo-MsgId'. Also adds
+a version header.
+
+=item my $ok = $yahoo->_extract_body($mhdr, $page);
+
+Extracts and adds to the Mail::Internet object in $mhdr the message body,
+including any attachments parsed out of $page. Returns 1 to indicate success,
+although no error conditions are currently checked for/ handled.
+
 =item $page = $yahoo->download_attachment($download_uri, $mailmsg);
 
-Downloads an attachment from the specified uri. $mailmsg is a reference to a
-Mail::Internet object.
+Downloads an attachment from the specified URI. $mailmsg is a reference to a
+Mail::Internet object. The downloaded attachment is added to the mailmsg via
+add_attachment_to_message()
 
+=item $yahoo->add_attachment_to_message($msg, $attachment, $filename);
+
+Adds the $attachment to $msg, adjusting Content-Type and MIME-Version as
+necessary.
+
+=item $yahoo->make_multipart_boundary()
+
+Currently does nothing useful. So far all messages have had correct types.
+
+
+=item $yahoo->get_folder_action_link($mbox, $linktype, $force);
+
+Returns and stores the 'action link' for the given $linktype. This is a URI
+that will cause an action to be performed on a message set, such as DELETE or
+MOVE.
 
 =item @message_headers = $yahoo->get_folder_index($folder);
 
-Returns a list of all the messages in the specified folder. 
+Returns a list of all the messages in the specified folder. These messages are
+stored as URIs. Logs the user in if necessary.
 
 
 =item @messages = $yahoo->_get_message_links($page)
@@ -1132,36 +1335,42 @@ Returns a list of all the messages in the specified folder.
 
 Returns the actual links (as an array) needed to pull down the messages. This
 method is used internally and is not intended to be used from applications,
-since the messages returned are not in a very friendly form.
+since the messages returned are not in a very friendly form. This method
+returns only the messages referenced on a given page, and is called from
+get_folder_index() to build up a complete list of all messages in a folder.
 
 
 =item @folders = $yahoo->get_folder_list();
 
-Returns a list of folders in the account. Logs the user in if necessary.
+Returns a list of folders in the account. Logs the user in if necessary. Also
+stores the two special folders ('Trash' and 'Bulk') so they can be emptied
+later.
 
 
 =item $ok = $yahoo->send($to, $subject, $body, $cc, $bcc, $flags);
 
 Attempts to send a message to the recipients listed in $to, $cc, and $bcc,
-with the specified subject and body text. Logs the user in if necessary.
+with the specified subject and body text. $to,$cc, and $bcc can be scalars or
+arrayrefs containing lists of recipients.
+
+Logs the user in if necessary.
 
 $flags may contain any combination of the constants exported by this package.
 Currently, these constants are:
 
   SAVE_COPY_TO_SENT_FOLDER  :    saves a copy of a sent message
+  ATTACH_SIG                :    attaches the sender's Yahoo signature
+  SEND_AS_HTML              :    sends the message in HTML format.
 
 cc and bcc come after subject and body in the parameter list (instead of with
 'to') since it is expected that
   
   send(to, subject, body)
 
-will be more common than sending to cc or bcc recipients - at least, this is
+will be more common than sending to Cc or BCc recipients - at least, this is
 how it is in my experience.
 
-
-$to, $cc and $bcc should contain comma-separated lists of email addresses,
-since this is what Yahoo prefers; as of this version, address-book lookups are
-not supported.
+As of this version, address-book lookups are not supported.
 
 As of this version, mail attachments are not supported.
 
@@ -1179,7 +1388,7 @@ parameters, while seemingly counter-intuitive, allows one of the great virtues
 of programming (laziness) by not requiring that the method be passed for every
 call.
 
-Returns the response object if no error occurs, otherwise undef.
+Returns the response object if no error occurs, undef on error.
 
 
 =item $current_trace_level = $yahoo->trace($new_trace_level);
@@ -1190,7 +1399,7 @@ the object. Returns the current trace level (i.e. before setting a new one).
 Trace levels are:
 
    0   no tracing output; warning messages only.
- > 0   informative messages only ("what I am doing")
+ > 0   informative messages ("what I am doing")
  > 1   URIs being fetched
  > 2   request response codes
  > 3   request parameters
@@ -1203,13 +1412,19 @@ Trace levels are:
 Sends debugging messages to STDERR, appended with a newline.
 
 
+=item $yahoo->make_host($uri)   or   Yahoo::make_host($uri)
+
+Returns a string consisting of just the scheme, host, and port parts of the URI.
+The URI::URL::as_string method returns the full URI (including path) but
+leaves out the port number, which is why it's unsuitable here.
+
 =back
 
 
 =head2 EXPORTS
 
-Nothing. The module is intended to be object-based, and functions should
-therefore be called using the -> operator. 
+Nothing but a few constants. The module is intended to be object-based, and
+functions should be called as such.
 
 =head2 CAVEATS
 
@@ -1232,5 +1447,3 @@ conformance to any configuration.
 
 
 =cut
-
-

@@ -1,5 +1,42 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+
+0.600
+	- Fixed sending buglet - generation of spurious warnings.
+	- Added support for signature attachment, and send-message-as-html.
+  - Added 'yahootils.pl' script with 'empty' action, to empty specified
+    folders. Supporting code added in Yahoo.pm to follow 'Empty' links.
+  - yahootils supercedes sendhoo and snagmail. 
+  - Yahoo::send() now accepts array-refs for To, Cc, and Bcc (scalars ok too)
+  - yahootils will read a message from STDIN, stopping at EOT (or ^.\s*$,
+    like SMTP), if --message is not provided.
+  - Changed README, updated documentation.
+  - Fixed bug where only  the current page of messages would be harvested if
+    the user settings cause the last page to be displayed by default.
+
+
+0.5a Tue Aug 19 02:43:49 GMT 2003 (pre-release for off-site testing)
+	- Fixed broken attachment code.
+	- Removed some deprecated methods from Yahoo.pm
+	-	Added filtering function to remove matching tag-sections in
+	  MessageParser.pm
+	-	Renamed MP:parse_body(_as_xxx) methods to body($1), and broke parsing down 
+	  into multiple steps.
+	- Fixed bug with surplus unshifting of mime-type and content boundary into
+	  message body.
+	- MessageParser can now render messages in HTML. It will also attempt to
+	  guess the correct type based on the presence/ absence of an HTML tag in
+	  the message, or a Content-Type in the message header.
+	- Added '_process_message', '_extract_header', and '_extract_body' methods,
+	  mostly to break up some longer pieces of code, but also to allow parsing
+	  of a page from a disk file or other local storage.
+	- Added CREDITS file.
+
+
+0.402 (Not tagged or released))
+  - Added version to test message.
+  - Hide password when running tests (requires 'stty')
+
 0.401 
   - Fixed bug with sending - 'money' field expected but not set.
   - Added minimum version of HTML::Tree
@@ -71,5 +108,4 @@ other items.
 	- First version released.
 
 0.01  Wed Apr 24 18:48:45 2002
-	- original version; created by h2xs 1.21 with options
-		-X -n Mail::Webmail
+	- original version; created by h2xs 1.21 with options -X -n Mail::Webmail
