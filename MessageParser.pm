@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   10/23/02
 
-#  $Id: MessageParser.pm,v 1.5 2002/10/28 19:08:02 simon Exp $
+#  $Id: MessageParser.pm,v 1.6 2003/01/11 14:03:56 simon Exp $
 #
 
 use strict;
@@ -158,11 +158,13 @@ sub parse_body
 	$body->push_content($msg);
 
 	if ($self->{_debug}) {
+		print "sdd 025; ------------------------------------------------\n";
 		print $page->as_HTML(undef, "\t");
 		print "sdd 026; ------------------------------------------------\n";
 		print $page->as_text;
 		print "sdd 027; ------------------------------------------------\n";
 		$page->dump;
+		print "sdd 028; ------------------------------------------------\n";
 	}
 
 	my $text = $page->as_text; # as_HTML(undef, "\t"); 

@@ -1,7 +1,7 @@
-#  (C)  Simon Drabble 2002
-#  sdrabble@cpan.org   03/22/02
+#  (C)  Simon Drabble 2002 - 2003
+#  sdrabble@cpan.org   2002-03-22
 
-#  $Id: Yahoo.pm,v 1.15 2002/10/28 19:08:02 simon Exp $
+#  $Id: Yahoo.pm,v 1.19 2003/01/18 03:53:07 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
@@ -23,7 +23,12 @@ our @ISA = qw(Exporter);
 # This is an object-based package. We export nothing except for some flag
 # values.
 our @EXPORT_OK = ();
-our @EXPORT = qw(SAVE_COPY_TO_SENT_FOLDER SUPPRESS_BANNERS);
+our @EXPORT = qw(
+		SAVE_COPY_TO_SENT_FOLDER
+		SUPPRESS_BANNERS
+		DELETE_ON_READ
+		MOVE_ON_READ
+);
 
 
 use Carp qw(carp);
@@ -47,7 +52,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.311;
+our $VERSION = 0.400;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -57,6 +62,11 @@ use Class::MethodMaker
 # passable on the command line, or overrideable in the calling app. They will
 # (hopefully) never change, but if they do, it would be better for the user to
 # edit a simple configuration file than modify (possibly system-wide) code.
+
+# Config specific to this package.
+our $USER_AGENT = "Yahoo-Webmail/$VERSION";
+our $ENV_PROXY  = 0;
+
 
 # Would prefer to 'use constant...' but that doesn't work well in regexps.
 our $SERVER               = 'http://mail.yahoo.com';	
@@ -97,10 +107,18 @@ our $COMPOSE_SENT_OK_POST= '';
 
 
 
+# Fields for performing group operations - delete, move to, etc.
+our $ACTION_FORM_NAME    = 'messageList';
+our $DELETE_FLAG_NAME    = 'DEL';
+our $MOVE_FLAG_NAME      = 'MOV';
+our $MOVE_TO_FOLDER_NAME = 'destBox';
+
 
 ## Flag names & values. Used when sending, among other things.
 use constant SAVE_COPY_TO_SENT_FOLDER => 1;
 use constant SUPPRESS_BANNERS         => 2;
+use constant DELETE_ON_READ           => 4; # This and MOVE_ON_READ are
+use constant MOVE_ON_READ             => 8; # mutually exclusive.
 
 
 
@@ -125,16 +143,18 @@ sub new
 	my $class = shift;
 
 	my %args = @_;
+
+	my $ua = new LWP::UserAgent(agent => $USER_AGENT, env_proxy => $ENV_PROXY);
 	
 	my $self = bless {
 		_server        => $args{server}   || $SERVER,
-		_username      => $args{username} || Carp::carp('No username defined'),
-		_password      => $args{password} || Carp::carp('No password defined'),
+		_username      => $args{username} || carp('No username defined'),
+		_password      => $args{password} || carp('No password defined'),
 		_login_server  => $args{login_server}|| $args{server} || $LOGIN_SERVER,
 		_cookie_file   => $args{cookie_file},
 		_logged_in     => 0,
 		_connected     => 0,
-		_ua            => new LWP::UserAgent,
+		_ua            => $ua,
 		_html_parser   => new Textractor,
 	}, $class;
 
@@ -251,7 +271,7 @@ sub login
 	my $welcome_page = $info->content;
 
 	unless ($welcome_page) {
-		$@ = "Unable to log in.";
+		$@ = "Unable to log in (No welcome page).";
 		$self->debug($@) if $self->trace;
 		return undef;
 	}
@@ -259,8 +279,9 @@ sub login
 ## welcome_page could be the login page returned, in the event of login
 ## failure.
 	if ($welcome_page !~ /$WELCOME_PAGE_CHECK/) {
-		$@ = "Unable to log in.";
+		$@ = "Unable to log in (welcome page did not contain welcome text).";
 		$self->debug($@) if $self->trace;
+#		$self->debug($welcome_page) if $self->trace > 9;
 		return undef;
 	}
 
@@ -294,7 +315,8 @@ sub get_mail_headers
 
 sub get_mail_messages
 {
-	my ($self, $mbox, $msg_list, $flags) = @_;
+	my ($self, $mbox, $msg_list, $flags, $newfol) = @_;
+	$flags ||= 0;
 
 
 	if (!$self->{_logged_in}) {
@@ -310,6 +332,29 @@ sub get_mail_messages
 
 	$self->get_folder_list;
 	my @msgs = $self->get_folder_index($mbox);
+
+	if ($flags & DELETE_ON_READ && $flags & MOVE_ON_READ) {
+		warn "DELETE_ON_READ and MOVE_ON_READ are mutually incompatible.\n";
+		warn "MOVE_ON_READ takes precedence.\n";
+		$flags ^= DELETE_ON_READ;
+	}
+
+	if ($flags & DELETE_ON_READ) {
+		my $l = $self->get_folder_action_link($mbox, $DELETE_FLAG_NAME);
+		if (!$l) {
+			warn "Unable to get 'Delete' URI - messages will NOT be deleted.\n";
+			$flags ^= DELETE_ON_READ;
+		}
+	}
+
+	if ($flags & MOVE_ON_READ) {
+		die "No folder to move to!\n" unless $newfol;
+		my $l = $self->get_folder_action_link($mbox, $MOVE_FLAG_NAME);
+		if (!$l) {
+			warn "Unable to get 'Move' URI - messages will NOT be moved.\n";
+			$flags ^= MOVE_ON_READ;
+		}
+	}
 
 	my @messages;
 
@@ -332,6 +377,8 @@ sub get_mail_messages
 		$uri =~ s/$EMPTY_FULL_HEADER_FLAG//g;
 		$uri .= "&" . $FULL_HEADER_FLAG;
 		$uri =~ s/inc=\d+\&?//g;
+		my ($yahoo_msg_id) = $uri =~ /MsgId=([^&]+)&/;
+
 		my $info = $self->_get_a_page($uri);
 		my $page = $info->content;
 		
@@ -403,6 +450,8 @@ sub get_mail_messages
 					}
 				}
 			}
+# Add the Yahoo message Id - this might come in useful.
+			push @hdrs, "X-Yahoo-MsgId: $yahoo_msg_id";
 
 # Sort the headers so 'From' comes first..
 			my $hdr = [sort { $a =~ /^From\s+/ ? -1 : 1 } @hdrs];
@@ -444,6 +493,23 @@ sub get_mail_messages
 #				return @messages
 #			}
 
+			if ($flags & DELETE_ON_READ) {
+				my $uri = $self->{STORED_URIS}->{base} .
+					$self->{STORED_URIS}->{DEL_action};
+				$uri .= "&Mid=$yahoo_msg_id";
+				$self->debug("Deleting $yahoo_msg_id") if $self->trace;
+				my $page = $self->_get_a_page($uri, 'GET');
+			}
+
+
+			if ($flags & MOVE_ON_READ) {
+				my $uri = $self->{STORED_URIS}->{base} .
+					$self->{STORED_URIS}->{MOV_action};
+				$uri .= "&$MOVE_TO_FOLDER_NAME=$newfol&Mid=$yahoo_msg_id";
+				$self->debug("Moving $yahoo_msg_id to $newfol with $uri")
+					if $self->trace;
+				my $page = $self->_get_a_page($uri, 'GET');
+			}
 
 		} else {
 
@@ -508,6 +574,67 @@ sub add_attachment_to_message
  		$encoded_data;
 	$msg->body(@body);
 	
+}
+
+
+
+
+sub get_folder_action_link
+{
+	my ($self, $mbox, $linktype, $force) = @_;
+
+	$self->login unless $self->{_logged_in};
+
+	if (!$self->{STORED_URIS}->{folder_list}->{$mbox}) {
+		die "No such folder '$mbox' found in list.\n";
+	}
+
+	my $index;
+	if (!($index = $self->{STORED_PAGES}->{message_index}->{$mbox}->[0])
+			|| $force) {
+		my $uri = $self->{STORED_URIS}->{folder_list}->{$mbox};
+		$self->debug("INDEX URI for $mbox: $uri") if $self->trace() > 1;
+		my $info = $self->_get_a_page($uri);
+		$index = $info->content;
+
+		$self->{STORED_PAGES}->{message_index}->{$mbox}->[0] = $index;
+	}
+
+
+	my $form_uri = '';
+	my @params = ();
+	my $start_collecting = 0;
+	my $p = new HTML::FormParser;
+
+	my $pobj = $p->parse($index, 
+				start_form  => sub {
+					my ($attr, $origtext) = @_;
+					if ($attr->{name} eq $ACTION_FORM_NAME) {
+						$form_uri = $attr->{action};
+						$start_collecting = 1;
+					}
+				},
+
+				start_input => sub {
+					my ($attr, $origtext) = @_;
+					return unless $start_collecting;
+					return unless $attr->{name};
+					if ($attr->{name} eq '.crumb' || $attr->{name} eq $linktype) {
+						$attr->{value} = 1 if $attr->{name} eq $linktype;
+						push @params, "$attr->{name}=$attr->{value}";
+					}
+				},
+		);
+
+	return undef unless $form_uri;
+	
+#		return link as well as store it
+	my $plist = join '&', @params;
+	$form_uri .= $form_uri =~ /\?/ ? "&$plist" : "?$plist";
+	$self->{STORED_URIS}->{"${linktype}_action"} = $form_uri;
+	warn "sdd 909; ($form_uri) ($plist)\n";
+	return $form_uri;
+
 }
 
 
@@ -764,7 +891,7 @@ sub send
 
 
 
-# FIXME: allow $params to be a hashref perhaps
+# TODO: allow $params to be a hashref perhaps
 sub _get_a_page
 {
 	my ($self, $uri, $method, $params) = @_;
@@ -781,13 +908,14 @@ sub _get_a_page
 	if (ref($params) eq 'ARRAY') {
 		my @vars;
 		for (@$params) {
-			my ($name, $value) = $_ =~ /([^=]*)=(.*)/s;
+			my ($name, $value) = $_ =~ /([^=]*)=?(.*)/s;
 			push @vars, "$name=" . CGI::escape($value);
 		}
-		my $char = $method eq 'GET' ? '&' : "\n";
-#FIXME: For some reason POST doesn't like \n-separated content :/
+		my $char = $method eq 'GET' ? '&' : "\r\n";
+# POST doesn't like \r\n-separated content :/
 		$char = '&';
 		$post_content = join $char, @vars;
+		$post_content .= $char if $char ne '&';
 	}
 
 

@@ -1,5 +1,11 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.4 Sun Jan 19 19:43:57 EST 2003
+  - Added 'DELETE_ON_READ' flag and functionality.
+  - Added 'MOVE_ON_READ' flag and functionality.
+  - Added both above options to snagmail.pl
+
+
 0.311 Tue Oct 29 17:08:58 EST 2002
   - Removed some debug statements.
   - Added disclaimer to README file.

@@ -4,3 +4,5 @@
 [ ]  Address book functionality & such.
 [ ]  allow dumping of original 'text' to a file.
 [ ]  allow removal of Yahoo banners, ads etc.
+[x]  proxy support
+[ ]  allow selection of messages by date, regexp in subject, etc.

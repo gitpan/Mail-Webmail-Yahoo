@@ -27,8 +27,8 @@ package. It allows you to download to your local machine all of the messages
 in your Yahoo account, attachments included. Future versions will allow bulk
 deletion, forwarding, and other useful mail functions.
 
-This is version 0.3 of the Mail::Webmail::Yahoo package; it may therefore be
-slightly brittle. While I have been testing it and using it on my own yahoo
+This is version 0.4 of the Mail::Webmail::Yahoo package; it may be slightly
+brittle. While I have been testing it and using it on my own yahoo
 accounts for several weeks, I would appreciate any feedback, positive or
 negative.
 
@@ -86,7 +86,7 @@ This module requires these other modules and libraries:
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2002  Simon Drabble  <sdrabble@cpan.org>
+Copyright (C) 2002,2003  Simon Drabble  <sdrabble@cpan.org>
 
 
 This module is released under the same terms as perl itself. Please see
