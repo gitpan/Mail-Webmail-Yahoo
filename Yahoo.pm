@@ -14,7 +14,7 @@ use warnings;
 require Exporter;
 our @ISA = qw(Exporter);
 
-our $VERSION = 0.12;
+our $VERSION = 0.13;
 
 # This is an object-based package. We export nothing.
 our @EXPORT_OK = ();
@@ -359,9 +359,9 @@ sub get_mail_messages
 # end will be a little harder...
 
 			my @body = $page =~ /\n\n\n\n(.*)/is;
-			open FOO, ">tmp/page_$mcount";
-			print FOO $page;
-			close FOO;
+##			open FOO, ">tmp/page_$mcount";
+##			print FOO $page;
+##			close FOO;
 			$mhdr->body(@body, "\n");
 
 			(my $prog = $0) =~ s/\s+\d+\s+messages//g;

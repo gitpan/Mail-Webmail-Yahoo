@@ -35,9 +35,9 @@ if ($ARGV[2]) {
 	eval { @fetchnums = (eval $ARGV[2]) };
 }
 
-my @messages = $yahoo->get_mail_messages('Inbox', \@fetchnums);
-print "Message Headers in Inbox: ", 0+@messages, "\n";
-open INBOX, ">${name}_Inbox";
+my @messages = $yahoo->get_mail_messages('Sent', \@fetchnums);
+print "Message Headers in Sent: ", 0+@messages, "\n";
+open INBOX, ">${name}_Sent";
 for (@messages) { print INBOX $_->as_mbox_string }
 close INBOX;
 print "\n";
