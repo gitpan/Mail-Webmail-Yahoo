@@ -16,7 +16,7 @@ this can be done by piping the output through procmail - add some stuff,
 perhaps a 'recipes' section in the README..
 [ ]  Dump X messages to file before continuing (i.e. don't store all 800
 messages in memory!)
-[ ]  'Empty' link (for trash etc)
+[x]  'Empty' link (for trash etc)
 [ ]  should be able to set tracing before creating object (well, before
 logging in! (i.e. in new())
 [ ]  Add 'trace level' parameter to Yahoo::debug() (removes unsightly "if $self->trace > X")

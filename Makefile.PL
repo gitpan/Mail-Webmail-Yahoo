@@ -9,6 +9,7 @@ WriteMakefile(
 			'Yahoo.pm' => '$(INST_LIB)/Mail/Webmail/Yahoo.pm',
 			'snagmail.pl' => '$(INST_LIB)/Mail/Webmail/snagmail.pl',
 			'sendhoo.pl' => '$(INST_LIB)/Mail/Webmail/sendhoo.pl',
+			'yahootils.pl' => '$(INST_LIB)/Mail/Webmail/yahootils.pl',
 			},
     'PREREQ_PM'		=> {
 			LWP::UserAgent => 0.1,

@@ -1,5 +1,8 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.601 Sat Oct 18 23:53:47 EDT 2003
+  - Added installation of yahootils.pl to Makefile.PL. Bah.
+
 
 0.600
 	- Fixed sending buglet - generation of spurious warnings.

@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble  2002,2003
 #  sdrabble@cpan.org  2002/03/22
 
-#  $Id: Yahoo.pm,v 1.30 2003/10/10 15:44:03 simon Exp $
+#  $Id: Yahoo.pm,v 1.31 2003/10/19 03:55:50 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
@@ -55,7 +55,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.600;
+our $VERSION = 0.601;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
