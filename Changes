@@ -1,7 +1,15 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.31 Sat Oct 26 10:44:03 EDT 2002
+  - Added some tracing output
+  - Check return value of login() in send(), and die if necessary.
+  - Also in get_mail_messages().
+  - Added documentation to MessageParser.pm
+
+
 0.301 Fri Oct 25 22:30:55 EDT 2002
   - Removed debugging file output from Yahoo.pm
+
 
 0.30i  Sun Oct 20 12:26:08 EDT 2002
   - Fixed a typo in Synopsis (WebMail should be Webmail)

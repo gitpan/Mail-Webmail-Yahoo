@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   03/22/02
 
-#  $Id: Yahoo.pm,v 1.14 2002/10/26 02:30:00 simon Exp $
+#  $Id: Yahoo.pm,v 1.15 2002/10/28 19:08:02 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
@@ -47,7 +47,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.301;
+our $VERSION = 0.31;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -252,6 +252,7 @@ sub login
 
 	unless ($welcome_page) {
 		$@ = "Unable to log in.";
+		$self->debug($@) if $self->trace;
 		return undef;
 	}
 
@@ -259,11 +260,14 @@ sub login
 ## failure.
 	if ($welcome_page !~ /$WELCOME_PAGE_CHECK/) {
 		$@ = "Unable to log in.";
+		$self->debug($@) if $self->trace;
 		return undef;
 	}
 
 
 	$self->{STORED_PAGES}->{welcome} = $welcome_page;
+
+	$self->debug("Welcome page is ($welcome_page)") if $self->trace > 9;
 
 	my $logged_in_uri = $info->request->url;
 
@@ -293,7 +297,17 @@ sub get_mail_messages
 	my ($self, $mbox, $msg_list, $flags) = @_;
 
 
-	$self->login unless $self->{_logged_in};
+	if (!$self->{_logged_in}) {
+# Although ideally login() should print some diagnostics, it might be called
+# from an application with "no" stderr. At this point, however, we are
+# acting as an application function, so we die with the generated error here.
+# If the application author wishes to live through this, perhaps to ask the
+# user for another password, the call to get_mail_messages() can be eval'd.
+		if (!$self->login) {
+			die "get_mail_messages: $@\n";
+		}
+	}
+
 	$self->get_folder_list;
 	my @msgs = $self->get_folder_index($mbox);
 
@@ -632,10 +646,18 @@ sub send
 	$flags ||= 0;
 
 	unless ($self->{_logged_in}) {
-		$self->login;
+		if (!$self->login) {
+# Although ideally login() should print some diagnostics, it might be called
+# from an application with "no" stderr. At this point, however, send() is
+# acting as an application function, so we die with the generated error here.
+# If the application author wishes to live through this, perhaps to ask the
+# user for another password, the call to send() can be eval'd.
+			die "send: $@\n";
+		}
 	}
 
 	my $compose_uri = $self->{STORED_URIS}->{compose};
+
 
 	if (!$compose_uri) {
 		my $p = new HTML::LinkExtor(
@@ -719,7 +741,7 @@ sub send
 	$uri =~ s/https/http/g;
 	my $meth = $self->{STORED_URIS}->{send}->{method};
 
-	$self->debug("Sending '$subject' to ", join($to, $cc, $bcc)) if $self->trace;
+	$self->debug("Sending '$subject' to ", join(' ', $to, $cc, $bcc)) if $self->trace;
 
 	my $info = $self->_get_a_page($uri, $meth, \@params);
 	my $recvd = $info->content;
@@ -759,7 +781,9 @@ sub _get_a_page
 	if (ref($params) eq 'ARRAY') {
 		my @vars;
 		for (@$params) {
-			my ($name, $value) = $_ =~ /([^=]*)=(.*)/;
+			warn "sdd 033a; ($_)\n";
+			my ($name, $value) = $_ =~ /([^=]*)=(.*)/s;
+			warn "sdd 033b; ($name) ($value)\n";
 			push @vars, "$name=" . CGI::escape($value);
 		}
 		my $char = $method eq 'GET' ? '&' : "\n";

@@ -2,7 +2,7 @@
 
 #  Simon Drabble	03/22/02
 #  sdrabble@cpan.org
-#  $Id: sendhoo.pl,v 1.3 2002/10/23 22:05:41 simon Exp $
+#  $Id: sendhoo.pl,v 1.5 2002/10/28 19:18:19 simon Exp $
 #
 
 

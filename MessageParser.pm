@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   10/23/02
 
-#  $Id: MessageParser.pm,v 1.4 2002/10/25 19:49:33 simon Exp $
+#  $Id: MessageParser.pm,v 1.5 2002/10/28 19:08:02 simon Exp $
 #
 
 use strict;
@@ -79,7 +79,7 @@ our $unicode_to_text = {
 	"&#8240"   => '',    #    Per Mille Sign
 	"&#352"    => '',    #    Latin Capital Letter S With Caron
 	"&#8249"   => '<',   #    Single Left-Pointing Angle Quotation Mark
-	"&#338"    => '',    #    Latin Capital Ligature OE
+	"&#338"    => 'OE',  #    Latin Capital Ligature OE
 	"&#8216"   => '`',   #    Left Single Quotation Mark
 	"&#8217"   => "'",   #    Right Single Quotation Mark
 	"&#8220"   => '"',   #    Left Double Quotation Mark
@@ -91,7 +91,7 @@ our $unicode_to_text = {
 	"&#8482"   => 'TM',  #    Trade Mark Sign
 	"&#353"    => '',    #    Latin Small Letter S With Caron
 	"&#8250"   => ">",   #    Single Right-Pointing Angle Quotation Mark
-	"&#339"    => '',    #    Latin Small Ligature OE
+	"&#339"    => 'oe',  #    Latin Small Ligature OE
 	"&#376"    => '',    #    Latin Capital Letter Y With Diaeresis
 };
 
@@ -213,4 +213,119 @@ sub end
 
 
 __END__
+
+
+=head1 NAME
+
+Mail::Webmail::MessageParser -- class to parse HTML webmail messages.
+
+=head1 SYNOPSIS
+
+	$p = new Mail::Webmail::MessageParser();
+	$p->message_start(_tag => 'div', id => 'message');
+	$body_text = $p->parse_body($html, $style);
+	while (($field, $data) = each @html_fields_from_somewhere) {
+		$header = $p->parse_header($field, $data);
+		push @headers, $header if $header;
+	}
+
+
+=head1 DESCRIPTION
+
+Parses header and body HTML and converts both to text, or optionally (for body
+text) to simpler fully-formed HTML. 
+
+The package extends HTML::TreeBuilder to include functionality for parsing
+email elements from an HTML string.
+
+=head2 METHODS
+
+=over 4
+
+=item $parser->message_start(@message_start_tokens);
+
+Sets the tokens to watch for that denote the beginning of a message. This
+allows email messages to be embedded within a DIV or other HTML enclosing tag,
+or simple just follow a particular sequence of tags.
+
+The @message_start_tokens array is passed verbatim to the HTML::TreeBuilder/
+HTML::Element functions for traversing the HTML tree. This is typically a
+list of items such as
+
+  '_tag', 'a', 'href', 'http://foo.bar.com'
+
+which is interpreted to mean "look for an 'anchor' tag with an 'href'
+parameter of 'http://foo.bar.com".
+
+Since this is a list or array, I typically use the slightly easier-to-read
+notation of
+
+  '_tag' => 'a', 'href' => 'http://foo.bar.com'
+
+
+=item $hdr_text = $parser->parse_header($field, $data);
+
+Attempts to find a valid Email header name in $field, and a corresponding
+value in $data. Potential header names are compared to those in
+@mail_header_names iff $field matches the $LOOKS_LIKE_A_HEADER regexp.
+
+If a valid field name is found, the returned string contains the header in the
+form 'Name: Value', for example 'To: "A User" <user@server.com>'. If no such
+field name is found, undef is returned.
+
+=item $normalised_html = $parser->parse_body_as_html($html);
+
+Convenience method; calls parse_body() with a style of 'html'.
+
+=item $text = $parser->parse_body_as_text($html);
+
+Convenience method; calls parse_body() with a style of 'text'.
+
+=item $text = $parser->parse_body($html, $style);
+
+Returns the parsed message body from $html, using the value passed to
+message_start() to determine the beginning of the message. The end of the
+message will be the corresponding close tag of the beginning, or the end of
+the string if the value passed to message_start() is not a container tag.
+
+The message body returned is converted to normalised HTML (i.e. wrapped in
+<html>, <body> tags as appropriate) if $style is 'html'. If $style is empty or
+'text', the message body is returned as plain text. Regardless of the style
+used, certain character conversions are performed, to remove non-standard
+HTML entities such as those introduced by MicroSoft HTML editors. 
+
+=item $parser->start($tagname, $attr, $attrseq, $origtext);
+=item $parser->end($tagname);
+
+Override the corresponding methods in HTML::TreeBuilder, which itself
+override those in HTML::Parser. These methods should not be called directly
+from an application. They are here mainly to remove surplus HTML tags from
+around the message body; these tags confuse HTML::TreeBuilder and thus result
+in poor behaviour. 
+
+
+=back
+
+
+=head2 EXPORTS
+
+Nothing.
+
+=head2 CAVEATS
+
+o  Currently the parse_body() method returns only text. 
+o  There may be some issues with the HTML entities being decoded.
+o  Message bodies should really be enclosed in container tags; I have not
+tested what happens if a non-contained tag is passed to message_start().
+
+=head1 AUTHOR
+
+  Simon Drabble  E<lt>sdrabble@cpan.orgE<gt>
+
+=head1 SEE ALSO
+
+  Mail::Webmail::Yahoo
+
+=cut
+
 
