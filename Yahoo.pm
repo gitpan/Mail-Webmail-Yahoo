@@ -52,7 +52,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.400;
+our $VERSION = 0.401;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -98,6 +98,8 @@ our $COMPOSE_BCC_FIELD   = 'Bcc';
 our $COMPOSE_SUBJ_FIELD  = 'Subj';
 our $COMPOSE_BODY_FIELD  = 'Body';
 our $COMPOSE_SAVE_COPY   = 'SaveCopy';
+our $COMPOSE_MONEY_FIELD = 'Money';
+our $COMPOSE_SEND_MONEY_CHK = 'SendMoney';
 
 ##our $COMPOSE_SENT_OK_PRE = 'Your\s+mail\s*';
 ##our $COMPOSE_SENT_OK_POST= '\s*has\s+been\s+sent\s+to';
@@ -632,7 +634,6 @@ sub get_folder_action_link
 	my $plist = join '&', @params;
 	$form_uri .= $form_uri =~ /\?/ ? "&$plist" : "?$plist";
 	$self->{STORED_URIS}->{"${linktype}_action"} = $form_uri;
-	warn "sdd 909; ($form_uri) ($plist)\n";
 	return $form_uri;
 
 }
@@ -840,6 +841,10 @@ sub send
 						$attr->{value} = $subject;
 					} elsif ($attr->{name} eq $COMPOSE_BODY_FIELD) {
 						$attr->{value} = $body;
+					} elsif ($attr->{name} eq $COMPOSE_MONEY_FIELD) {
+						$attr->{value} = "";
+					} elsif ($attr->{name} eq $COMPOSE_SEND_MONEY_CHK) {
+						$attr->{value} = "";
 					} elsif ($attr->{name} eq $COMPOSE_SAVE_COPY) {
 						$attr->{value} = $flags & SAVE_COPY_TO_SENT_FOLDER ? 'yes' : 'no';
 					}
@@ -872,6 +877,10 @@ sub send
 
 	my $info = $self->_get_a_page($uri, $meth, \@params);
 	my $recvd = $info->content;
+
+	open MSGSENT, ">sent";
+	print MSGSENT $recvd;
+	close MSGSENT;
 
 ##	my $check_sent_ok = $COMPOSE_SENT_OK_PRE . "\\($subject\\)"
 ##			. $COMPOSE_SENT_OK_POST;

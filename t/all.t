@@ -99,3 +99,5 @@ if ($y_username && $email ne 'none') {
 }
 
 skip(!$y_username || $email eq 'none', $sr, 1, $@);
+
+# vim:ft=perl

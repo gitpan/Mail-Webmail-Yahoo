@@ -46,7 +46,7 @@ my $flags = 0;
 my $move_to = '';
 
 # If you wish to delete messages on server after downloading, uncomment this:
-$flags |= DELETE_ON_READ;
+#$flags |= DELETE_ON_READ;
 
 # If you wish to move messages after downloading, uncomment the next 2 lines:
 # Note that MOVE_ON_READ has precedence over DELETE_ON_READ.

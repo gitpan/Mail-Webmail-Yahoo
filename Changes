@@ -1,5 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.401 
+  - Fixed bug with sending - 'money' field expected but not set.
+  - Added minimum version of HTML::Tree
+
 0.4 Sun Jan 19 19:43:57 EST 2003
   - Added 'DELETE_ON_READ' flag and functionality.
   - Added 'MOVE_ON_READ' flag and functionality.
