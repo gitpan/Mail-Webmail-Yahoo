@@ -1,0 +1,10 @@
+Revision history for Perl extension Mail::Webmail.
+
+0.01  Wed Apr 24 18:48:45 2002
+	- original version; created by h2xs 1.21 with options
+		-X -n Mail::Webmail
+
+0.1   Sat Jun 15 16:30:22 2002
+	- Main functionality complete.
+	- First version released.
+
