@@ -47,7 +47,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.31;
+our $VERSION = 0.311;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -781,9 +781,7 @@ sub _get_a_page
 	if (ref($params) eq 'ARRAY') {
 		my @vars;
 		for (@$params) {
-			warn "sdd 033a; ($_)\n";
 			my ($name, $value) = $_ =~ /([^=]*)=(.*)/s;
-			warn "sdd 033b; ($name) ($value)\n";
 			push @vars, "$name=" . CGI::escape($value);
 		}
 		my $char = $method eq 'GET' ? '&' : "\n";

@@ -1,5 +1,9 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.311 Tue Oct 29 17:08:58 EST 2002
+  - Removed some debug statements.
+  - Added disclaimer to README file.
+
 0.31 Sat Oct 26 10:44:03 EDT 2002
   - Added some tracing output
   - Check return value of login() in send(), and die if necessary.
