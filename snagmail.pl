@@ -2,7 +2,7 @@
 
 #  Simon Drabble	03/22/02
 #  sdrabble@cpan.org
-#  $Id: snagmail.pl,v 1.6 2002/10/24 21:39:23 simon Exp $
+#  $Id: snagmail.pl,v 1.7 2002/10/25 19:49:33 simon Exp $
 #
 
 

@@ -1,5 +1,8 @@
 Revision history for Perl extension Mail::Webmail::Yahoo.
 
+0.301 Fri Oct 25 22:30:55 EDT 2002
+  - Removed debugging file output from Yahoo.pm
+
 0.30i  Sun Oct 20 12:26:08 EDT 2002
   - Fixed a typo in Synopsis (WebMail should be Webmail)
   - Set default trace level to 1 in snagmail.pl and sendhoo.pl.

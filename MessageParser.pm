@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   10/23/02
 
-#  $Id: MessageParser.pm,v 1.3 2002/10/24 21:39:23 simon Exp $
+#  $Id: MessageParser.pm,v 1.4 2002/10/25 19:49:33 simon Exp $
 #
 
 use strict;
@@ -10,6 +10,8 @@ use warnings;
 package Mail::Webmail::MessageParser;
 
 use base 'HTML::TreeBuilder';
+
+our $VERSION = 0.1;
 
 our $LOOKS_LIKE_A_HEADER = qr{\b[-\w]+:};
 
@@ -76,7 +78,7 @@ our $unicode_to_text = {
 	"&#710"    => '',    #    Modifier Letter Circumflex Accent
 	"&#8240"   => '',    #    Per Mille Sign
 	"&#352"    => '',    #    Latin Capital Letter S With Caron
-	"&#8249"   => '`',   #    Single Left-Pointing Angle Quotation Mark
+	"&#8249"   => '<',   #    Single Left-Pointing Angle Quotation Mark
 	"&#338"    => '',    #    Latin Capital Ligature OE
 	"&#8216"   => '`',   #    Left Single Quotation Mark
 	"&#8217"   => "'",   #    Right Single Quotation Mark
@@ -88,7 +90,7 @@ our $unicode_to_text = {
 	"&#732"    => '~',   #    Small Tilde
 	"&#8482"   => 'TM',  #    Trade Mark Sign
 	"&#353"    => '',    #    Latin Small Letter S With Caron
-	"&#8250"   => "'",   #    Single Right-Pointing Angle Quotation Mark
+	"&#8250"   => ">",   #    Single Right-Pointing Angle Quotation Mark
 	"&#339"    => '',    #    Latin Small Ligature OE
 	"&#376"    => '',    #    Latin Capital Letter Y With Diaeresis
 };

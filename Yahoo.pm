@@ -1,7 +1,7 @@
 #  (C)  Simon Drabble 2002
 #  sdrabble@cpan.org   03/22/02
 
-#  $Id: Yahoo.pm,v 1.12 2002/10/24 21:39:23 simon Exp $
+#  $Id: Yahoo.pm,v 1.14 2002/10/26 02:30:00 simon Exp $
 #
 
 package Mail::Webmail::Yahoo;
@@ -9,8 +9,8 @@ package Mail::Webmail::Yahoo;
 require 5.006_000;
 
 
-BEGIN { open SIMONLOG, ">simon.$$.tmp" }
-END   { close SIMONLOG }
+#BEGIN { open SIMONLOG, ">simon.$$.tmp" }
+#END   { close SIMONLOG }
 
 
 use strict;
@@ -47,7 +47,7 @@ use CGI qw(escape unescape);
 
 
 
-our $VERSION = 0.30;
+our $VERSION = 0.301;
 
 use Class::MethodMaker
 	get_set => [qw(trace cache_messages cache_headers)];
@@ -339,7 +339,7 @@ sub get_mail_messages
 			$0 = $prog;
 
 
-			print SIMONLOG "sdd 025.$mcount; ($page)\n";
+#			print SIMONLOG "sdd 025.$mcount; ($page)\n";
 
 			for my $t (@$stored_tables) {
 				next unless $t->{rows};
